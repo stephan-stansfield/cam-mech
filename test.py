@@ -14,7 +14,7 @@ import sys
 #gear_ratios = np.array([[0.25, 0.15, 0.15, 0.25,    1,    1, 0.75, 0.3],
 #                        [0,    0.05,  0.25, 0.3, 0.45, 0.55, 0.6, 0.7]])
 
-# gear_ratios = np.array([[0.2, 0.18, 0.18, 0.32,    1.7,    2, 1.8, 0.8],
+# gear_ratios = np.array([[0.2, 0.18, 0.18, 0.32,  1.7,    2, 1.8, 0.8],
 #                        [0,    0.08,  0.3, 0.35, 0.45, 0.55, 0.6, 0.65]])
 
 # gear_ratios = np.array([[0.3, 0.22, 0.3, 0.8, 1.7 , 2 , 1.8 , 0.8,  0.38, ],
@@ -32,11 +32,21 @@ import sys
 
 # column 0 of gear_ratios holds desired gear ratios
 # column 1 of gear_ratios holds percentage of sitting motion associated with the gear ratios in col 0
-gear_ratios = np.array([[0.18, 0.18, 0.3, 0.8, 1.7 , 2 , 1.8 , 0.8 ],
-                        [0  , 0.08, 0.28, 0.4, 0.45, 0.5, 0.58, 0.66]])
+# numbers used in class prototype:
+# gear_ratios = np.array([[0.18, 0.18, 0.3, 0.8, 1.7 , 2 , 1.8 , 0.8 ],
+#                         [0  , 0.08, 0.28, 0.4, 0.45, 0.5, 0.58, 0.66]])
 
-# gear_ratios = np.array([[]
-#                         []])
+# good enough (peak around 35%, bumpy slope)
+# gear_ratios = np.array([[0.18, 0.18, 0.3, 0.5, 1.15, 1.5, 2.0,  1.8, 0.8],
+#                         [0  , 0.08, 0.28, 0.4, 0.45, 0.5, 0.58, 0.60, 0.66]])
+
+# sharp peak right at 32.5%; peak force 200 N, sitting force 25 N
+# gear_ratios = np.array([[0.18, 0.18, 0.3, 0.5, 1.7,  2.0,  1.8, 0.8],
+#                         [0  , 0.08, 0.28, 0.4, 0.45, 0.5, 0.60, 0.66]])
+
+# profiles as of committee meeting 1 (peak at 32.5%; peak force 175 N, sitting force 27.5 N)
+gear_ratios = np.array([[0.18, 0.18, 0.3, 0.5, 1.4,  1.7,  1.5, 0.9],
+                        [0  , 0.08, 0.28, 0.4, 0.45, 0.5, 0.60, 0.66]])
 
 gear_ratios[1, :] = 2*np.pi*gear_ratios[1, :] # convert column 1 of gear_ratios to radians
 

@@ -50,12 +50,12 @@ class CamGeneration:
         '''
         r_lim = 0.5        # after interpolation, the r_min will be lower than r_lim
         for i in range(self.points): # for all the defined points on a cam
-            m = self.gear_ratios[i, 0]/self.initial_gr # normalize input to initial gear ratio
-            r = np.sqrt(m)*self.cam_radii[i, 0]
-            R = self.cam_radii[i, 1]/np.sqrt(m)
+            m = self.gear_ratios[i, 0] / self.initial_gr # normalize input to initial gear ratio
+            r = np.sqrt(m) * self.cam_radii[i, 0]
+            R = self.cam_radii[i, 1] / np.sqrt(m)
             if r < r_lim:
-                r = r_lim*self.cam_radii[i, 0]
-                R = r_lim*self.cam_radii[i, 1]/m
+                r = r_lim * self.cam_radii[i, 0]
+                R = r_lim * self.cam_radii[i, 1] / m
             self.cam_radii[i, 0] = r
             self.cam_radii[i, 1] = R
 
@@ -281,13 +281,13 @@ class CamGeneration:
         
 
         # DEBUG
-        print("shape of percentage: ", np.shape(percentage))
-        print("shape of xc_knee: ", np.shape(xc_knee))
-        print("PERCENTAGE: ", percentage)
-        print("XC_KNEE: ", xc_knee)
+        # print("shape of percentage: ", np.shape(percentage))
+        # print("shape of xc_knee: ", np.shape(xc_knee))
+        # print("PERCENTAGE: ", percentage)
+        # print("XC_KNEE: ", xc_knee)
         
-        print("perc_neg: ", perc_neg)
-        print("shape of percentage neg: ", np.shape(perc_neg))
+        # print("perc_neg: ", perc_neg)
+        # print("shape of percentage neg: ", np.shape(perc_neg))
 
         percentage = np.concatenate((perc_neg, percentage))
         percentage_flip = np.flip(percentage)
@@ -295,16 +295,15 @@ class CamGeneration:
         xc_knee = np.concatenate((xc_knee, xc_knee_neg))
         
 
-        print("new percentage: ", percentage)
-        print("new xc_knee: ", xc_knee)
-        print("shape of new perc: ", np.shape(percentage))
-        print("shape of new xc_knee: ", np.shape(xc_knee))
+        # print("new percentage: ", percentage)
+        # print("new xc_knee: ", xc_knee)
+        # print("shape of new perc: ", np.shape(percentage))
+        # print("shape of new xc_knee: ", np.shape(xc_knee))
 
         plt.figure()
         plt.plot(percentage_flip, xc_knee)
         plt.xlabel('Stance Percentage (%)')
         plt.ylabel('Cable Displacement (m)')
-        plt.title('Extrapolated Cable Displacement')
         
         # create functions relating cable and elastic displacement to cam angle
         cable_fcn = interpolate.interp1d(x_c, self.angles, kind='cubic', fill_value='extrapolate') # cable displacement in, angle out
@@ -320,13 +319,11 @@ class CamGeneration:
         plt.plot(percentage_flip, angle_percentage)
         plt.xlabel('Stance Percentage (%)')
         plt.ylabel('Cam Angle (rad)')
-        plt.title('Cam angle calculated from stance percentage')
 
         plt.figure()
         plt.plot(percentage_flip, elastic_percentage)
         plt.xlabel('Stance Percentage (%)')
         plt.ylabel('Elastic displacement (m)')
-        plt.title('Elastic displacement calculated from stance percentage')
 
         # calculate cable force using stance percentage as independent variable
         # f_c_new = R / r * k * f_e[-1] * (1 - (knee_angles_flip - np.min(knee_angles_flip)) / (np.ptp(knee_angles)))
@@ -352,7 +349,7 @@ class CamGeneration:
         plt.figure()
         # plt.plot(self.angles / 2 / np.pi * 360, f_e, label='Elastic Band Force', linewidth=3)
         plt.plot(np.flip(percentage), f_c_new, label='Cable Force', linewidth=3)
-        plt.legend(loc="lower right")
+        plt.legend(loc="upper right")
         plt.xlabel('Stance Percentage (%)')
         # plt.xlabel('pulling distance/cam perimeter distance (m)')
         plt.ylabel('Force (N)')
@@ -361,7 +358,7 @@ class CamGeneration:
         plt.xlim([-60, 100])
         plt.ylim([0, 250])
         # plt.gca().set_xticks([0, 0.04, 0.08, 0.12, 0.16])
-        plt.title("Force Profiles of the Mechanism")
+        # plt.title("Cable Tension vs. Stance Percentage")
         
         np.savetxt('force_output.csv', np.stack((self.angles, x_c, f_e, f_c), axis=1),  header='angles(rad), pulling distance(m), elastic band force(n), cable force(n)')
         if torque:
