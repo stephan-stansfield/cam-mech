@@ -246,6 +246,19 @@ class CamGeneration:
         percentage_flip = np.flip(percentage) # flip percentage stance to correspond to knee angle (standing to sitting)
         xc_knee = x_c[self.sit_ind] * (1 - (knee_angles_flip - np.min(knee_angles_flip)) / np.ptp(knee_angles_flip) ) # scale cable displacement to knee angle (goes from standing to sitting)
         
+        # plot knee angle vs. cable displacement
+        plt.figure()
+        plt.plot(knee_angles_flip, xc_knee)
+        plt.xlabel('knee angle (degree)')
+        plt.ylabel('cable displacement, xc (m)')
+        plt.title('knee angle and cable displacement linear relationship')
+
+        # plot stance percentage vs. cable displacement
+        plt.figure()
+        plt.plot(percentage_flip, xc_knee)
+        plt.xlabel('Stance Percentage (%)')
+        plt.ylabel('Cable Displacement (m)')
+
         # add "negative" stance phase to account for part of cam past sitting index
         perc_neg = np.linspace((self.sit_ind - self.ninterp) * (100 / self.sit_ind), -100 / self.sit_ind, self.ninterp - self.sit_ind)
         xc_knee_neg = np.linspace(xc_knee[-1], xc_knee[-1] + (self.ninterp - self.sit_ind) * ((xc_knee[-1] - xc_knee[ np.int_(3*self.sit_ind/4) ] ) / (self.sit_ind/4)), self.ninterp - self.sit_ind)
@@ -268,19 +281,6 @@ class CamGeneration:
         f_c_new = R / r * k * elastic_percentage
         
         ### plot and save values ###
-        # plot knee angle vs. cable displacement
-        plt.figure()
-        plt.plot(knee_angles_flip, xc_knee)
-        plt.xlabel('knee angle (degree)')
-        plt.ylabel('cable displacement, xc (m)')
-        plt.title('knee angle and cable displacement linear relationship')
-
-        # plot stance percentage vs. cable displacement
-        plt.figure()
-        plt.plot(percentage_flip, xc_knee)
-        plt.xlabel('Stance Percentage (%)')
-        plt.ylabel('Cable Displacement (m)')
-
         # plot cam angle vs. stance percentage
         plt.figure()
         plt.plot(percentage_flip, angle_percentage)
