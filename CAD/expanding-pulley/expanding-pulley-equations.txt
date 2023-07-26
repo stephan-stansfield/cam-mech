@@ -1,0 +1,12 @@
+"slot-radius"=0.1
+
+"slot-end-angle"=60
+
+"slot-spacing-angle"=60
+
+"slot-gap"=0.01
+
+"pulley-thickness"=0.25
+
+"pin-diameter"=2*"slot-width"-2*"slot-gap"
+
