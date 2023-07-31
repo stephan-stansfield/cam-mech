@@ -1,12 +1,7 @@
-"slot-radius"=0.1
-
-"slot-end-angle"=60
-
-"slot-spacing-angle"=60
-
-"slot-gap"=0.01
-
-"pulley-thickness"=0.25
-
-"pin-diameter"=2*"slot-width"-2*"slot-gap"
-
+﻿"slot-end-angle"=60
+"slot-spacing-angle"=60
+"slot-gap"=0.01
+"pulley-thickness"=0.25
+"pin-diameter"=2*"slot-radius"-2*"slot-gap"
+"slot-radius"=3/32
+"vert-line-length"=2.0in"disc-thickness"=0.1875in"center-distance"=0.375in"slot-to-disc-OD"=1.0in"number-slots"=8
