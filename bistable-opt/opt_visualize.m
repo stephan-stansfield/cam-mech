@@ -2,8 +2,7 @@ function opt_visualize(keypoints)
 
     close all;
 
-    [rA1, rB1, rC1, rD1, rE1, rF1, rG1, rH1, rA2, rB2, rC2, rD2, rE2,...
-        rF2, rG2, rH2] = unpack_keypoints(keypoints);
+    [rA1, rB1, rC1, rD1, rE1, rF1, rA2, rB2, rC2, rD2, rE2, rF2] = unpack_keypoints(keypoints);
 
     % Create plotting handles & settings
     figure(1);
@@ -32,9 +31,6 @@ function opt_visualize(keypoints)
     h_CD = plot([0],[0],'LineWidth',2);
     h_CE = plot([0],[0],'LineWidth',2);
     h_DF = plot([0],[0],'LineWidth',2);
-    h_EF = plot([0],[0],'LineWidth',2);
-    h_EG = plot([0],[0],'LineWidth',2);
-    h_FH = plot([0],[0],'LineWidth',2);
     
     % Plot vectors between keypoints as lines
     set(h_OB, 'XData', [0, rB1(1)]);
@@ -54,16 +50,6 @@ function opt_visualize(keypoints)
     
     set(h_DF, 'XData', [rD1(1), rF1(1)]);
     set(h_DF, 'YData', [rD1(2), rF1(2)]);
-    
-    set(h_EF, 'XData', [rE1(1), rF1(1)]);
-    set(h_EF, 'YData', [rE1(2), rF1(2)]);
-    
-    set(h_EG, 'XData', [rE1(1), rG1(1)]);
-    set(h_EG, 'YData', [rE1(2), rG1(2)]);
-    
-    set(h_FH, 'XData', [rF1(1), rH1(1)]);
-    set(h_FH, 'YData', [rF1(2), rH1(2)]);
-
 
     % create 2nd set of axes so 2nd solution will plot with same color order
     a2 = axes;
@@ -82,9 +68,6 @@ function opt_visualize(keypoints)
     h_CD2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     h_CE2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     h_DF2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_EF2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_EG2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_FH2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     
     % Plot vectors between keypoints as lines
     set(h_OB2, 'XData', [0, rB2(1)]);
@@ -104,22 +87,13 @@ function opt_visualize(keypoints)
     
     set(h_DF2, 'XData', [rD2(1), rF2(1)]);
     set(h_DF2, 'YData', [rD2(2), rF2(2)]);
-    
-    set(h_EF2, 'XData', [rE2(1), rF2(1)]);
-    set(h_EF2, 'YData', [rE2(2), rF2(2)]);
-    
-    set(h_EG2, 'XData', [rE2(1), rG2(1)]);
-    set(h_EG2, 'YData', [rE2(2), rG2(2)]);
-    
-    set(h_FH2, 'XData', [rF2(1), rH2(1)]);
-    set(h_FH2, 'YData', [rF2(2), rH2(2)]);
 
     % Label keypoints
-    xtxt = [0, rA1(1), rB1(1), rC1(1), rD1(1), rE1(1), rF1(1), rG1(1), ...
-        rH1(1), rC2(1), rD2(1), rE2(1), rF2(1), rG2(1), rH2(1)];
-    ytxt = [0, rA1(2), rB1(2), rC1(2), rD1(2), rE1(2), rF1(2), rG1(2), ...
-        rH1(2), rC2(2), rD2(2), rE2(2), rF2(2), rG2(2), rH2(2)];
-    str = {'O', 'A', 'B', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1', 'C2', 'D2', 'E2', 'F2', 'G2', 'H2'};
+    xtxt = [0, rA1(1), rB1(1), rC1(1), rD1(1), rE1(1), rF1(1), ...
+        rC2(1), rD2(1), rE2(1), rF2(1)];
+    ytxt = [0, rA1(2), rB1(2), rC1(2), rD1(2), rE1(2), rF1(2), ...
+        rC2(2), rD2(2), rE2(2), rF2(2)];
+    str = {'O', 'A', 'B', 'C1', 'D1', 'E1', 'F1', 'C2', 'D2', 'E2', 'F2'};
     text(xtxt,ytxt,str);
 
     hold off;
@@ -140,9 +114,6 @@ function opt_visualize(keypoints)
     h_CD = plot([0],[0],'LineWidth',2);
     h_CE = plot([0],[0],'LineWidth',2);
     h_DF = plot([0],[0],'LineWidth',2);
-    h_EF = plot([0],[0],'LineWidth',2);
-    h_EG = plot([0],[0],'LineWidth',2);
-    h_FH = plot([0],[0],'LineWidth',2);
     
     % Plot vectors between keypoints as lines
     set(h_OB, 'XData', [0, rB1(1)]);
@@ -162,15 +133,11 @@ function opt_visualize(keypoints)
     
     set(h_DF, 'XData', [rD1(1), rF1(1)]);
     set(h_DF, 'YData', [rD1(2), rF1(2)]);
-    
-    set(h_EF, 'XData', [rE1(1), rF1(1)]);
-    set(h_EF, 'YData', [rE1(2), rF1(2)]);
-    
-    set(h_EG, 'XData', [rE1(1), rG1(1)]);
-    set(h_EG, 'YData', [rE1(2), rG1(2)]);
-    
-    set(h_FH, 'XData', [rF1(1), rH1(1)]);
-    set(h_FH, 'YData', [rF1(2), rH1(2)]);
+
+    xtxt = [0, rA1(1), rB1(1), rC1(1), rD1(1), rE1(1), rF1(1)];
+    ytxt = [0, rA1(2), rB1(2), rC1(2), rD1(2), rE1(2), rF1(2)];
+    str = {'O', 'A', 'B', 'C1', 'D1', 'E1', 'F1'};
+    text(xtxt,ytxt,str);
 
     hold off;
 
@@ -190,9 +157,6 @@ function opt_visualize(keypoints)
     h_CD2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     h_CE2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     h_DF2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_EF2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_EG2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
-    h_FH2 = plot([0],[0],'LineWidth',2,'LineStyle','--');
     
     % Plot vectors between keypoints as lines
     set(h_OB2, 'XData', [0, rB2(1)]);
@@ -212,14 +176,12 @@ function opt_visualize(keypoints)
     
     set(h_DF2, 'XData', [rD2(1), rF2(1)]);
     set(h_DF2, 'YData', [rD2(2), rF2(2)]);
-    
-    set(h_EF2, 'XData', [rE2(1), rF2(1)]);
-    set(h_EF2, 'YData', [rE2(2), rF2(2)]);
-    
-    set(h_EG2, 'XData', [rE2(1), rG2(1)]);
-    set(h_EG2, 'YData', [rE2(2), rG2(2)]);
-    
-    set(h_FH2, 'XData', [rF2(1), rH2(1)]);
-    set(h_FH2, 'YData', [rF2(2), rH2(2)]);
+
+    xtxt = [0, rA2(1), rB2(1), rC2(1), rD2(1), rE2(1), rF2(1)];
+    ytxt = [0, rA2(2), rB2(2), rC2(2), rD2(2), rE2(2), rF2(2)];
+    str = {'O', 'A', 'B', 'C2', 'D2', 'E2', 'F2'};
+    text(xtxt,ytxt,str);
+
+    hold off;
 
 end

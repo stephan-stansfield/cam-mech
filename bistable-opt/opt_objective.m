@@ -15,10 +15,10 @@ function f = opt_objective(vars)
     % Solve kinematic chain with provided inputs. If a solution exists, 
     % returns x- and y-coordinates of the two solutions in an array.
     keypoints = opt_calculate(vars);
-    y1 = keypoints(2, 7);
-    y2 = keypoints(4, 7);
-    x1 = keypoints(1, 7);
-    x2 = keypoints(3, 7);
+    y1 = keypoints(2, 5);
+    y2 = keypoints(4, 5);
+    x1 = keypoints(1, 5);
+    x2 = keypoints(3, 5);
 
     wy = 1;
     wx = 1;

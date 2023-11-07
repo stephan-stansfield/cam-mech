@@ -6,8 +6,6 @@ function unpack(keypoints)
     rD1 = keypoints(1,4,:);
     rE1 = keypoints(1,5,:);
     rF1 = keypoints(1,6,:);
-    rG1 = keypoints(1,7,:);
-    rH1 = keypoints(1,8,:);
 
     rA2 = keypoints(2,1,:);
     rB2 = keypoints(2,2,:);
@@ -15,7 +13,5 @@ function unpack(keypoints)
     rD2 = keypoints(2,4,:);
     rE2 = keypoints(2,5,:);
     rF2 = keypoints(2,6,:);
-    rG2 = keypoints(2,7,:);
-    rH2 = keypoints(2,8,:);
 
 end
