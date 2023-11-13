@@ -34,7 +34,24 @@ problem.options = optimoptions('fmincon','Display','iter',...
 problem.solver = 'fmincon';                                     % required
 x = fmincon(problem);                                           % solve nonlinear programming problem
 
-% Get solution from optimized variables
+% Assign optimal values back to variable names
+l_OA = x(1);
+l_AB = x(2);
+l_AC = x(3);
+l_BD = x(4);
+l_CD = x(5);
+l_CE = x(6);
+l_DF = x(7);
+alph = x(8);
+gamma = x(9);
+delta = x(10);
+epsilon = x(11);
+alph_deg = rad2deg(alph);
+gamma_deg = rad2deg(gamma);
+delta_deg = rad2deg(delta);
+epsilon_deg = rad2deg(epsilon);
+
+% Get solution keypoints from optimized lengths & angles
 keypoints = opt_calculate(x);
 
 toc; % stop timing
@@ -51,3 +68,5 @@ EEdy_des = 24;
 
 diff_x = EEdx - EEdx_des
 diff_y = EEdy - EEdy_des
+
+
