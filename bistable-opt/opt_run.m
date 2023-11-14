@@ -63,10 +63,13 @@ opt_visualize(keypoints);
 EEdx = keypoints(3, 5) - keypoints(1, 5);
 EEdy = keypoints(4, 5) - keypoints(2, 5);
 
+INdx = keypoints(3, 6) - keypoints(1, 6);
+INdy = keypoints(4, 6) - keypoints(2, 6);
+
 EEdx_des = 44;
 EEdy_des = 24;
 
-diff_x = EEdx - EEdx_des
-diff_y = EEdy - EEdy_des
+diff_x = EEdx - EEdx_des;
+diff_y = EEdy - EEdy_des;
 
 
