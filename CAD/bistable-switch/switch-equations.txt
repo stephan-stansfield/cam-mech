@@ -2,5 +2,5 @@
 "switch-thickness"=12
 "base-width"=4.0
 "axle-bushing-radius"=3
-"clearance"= 0.5
+"clearance"= 0.25
 "arm-width"=3.0"min-diameter"=70
