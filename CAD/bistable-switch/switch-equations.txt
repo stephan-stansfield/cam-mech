@@ -3,4 +3,4 @@
 "base-width"=4.0
 "axle-bushing-radius"=3
 "clearance"= 0.25
-"arm-width"=3.0"min-diameter"=70
+"arm-width"=3.0"min-diameter"=70"alpha"=79.9"gamma"=99.6"l_AB"=16.85"l_BD"=7.32
