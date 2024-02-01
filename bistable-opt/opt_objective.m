@@ -15,28 +15,28 @@ function f = opt_objective(vars)
     % Solve kinematic chain with provided inputs. If a solution exists, 
     % returns x- and y-coordinates of the two solutions in an array.
     keypoints = opt_calculate(vars);
-%     EEdx = keypoints(3, 5) - keypoints(1, 5);
-    EEdy = keypoints(4, 5) - keypoints(2, 5);
-%     INdx = keypoints(3, 6) - keypoints(1, 6);
-%     INdy = keypoints(4, 6) - keypoints(2, 6);
+%     EE_dx = keypoints(3, 5) - keypoints(1, 5);
+    EE_dy = keypoints(4, 5) - keypoints(2, 5);
+%     IN_dx = keypoints(3, 6) - keypoints(1, 6);
+%     IN_dy = keypoints(4, 6) - keypoints(2, 6);
 
     % Weights
     wx = 1;
     wy = 1;
 
     % Goals (mm)
-    EEdx_des = 44;
-    EEdy_des = 24;
-    INdx_des = 22;
-    INdy_des = 0;
+    EE_dx_des = 44;
+    EE_dy_des = 11.5;
+    IN_dx_des = 22;
+    IN_dy_des = 0;
 
     % Evaluate objective function
 %     f = -wy*(y2 - y1)^2 + wx*(x2 - x1)^2; % maximize end-effector change in Y, min. change in X
 %     f = -wy*(y2 - y1)^2; @ maximize end-effector change in y
     % minimize error between actual and desired end-effector distance traveled
-%     f = wx*(EEdx - EEdx_des)^2 + wy*(EEdy - EEdy_des)^2 + ...               
-%         wx*(INdx - INdx_des)^2 + wy*(INdy - INdy_des)^2 ; 
-%     f = wx*(EEdx - EEdx_des)^2 + wy*(EEdy - EEdy_des)^2 ;
-    f = wy*(EEdy - EEdy_des)^2 ;
+%     f = wx*(EE_dx - EE_dx_des)^2 + wy*(EE_dy - EE_dy_des)^2 + ...               
+%         wx*(IN_dx - IN_dx_des)^2 + wy*(IN_dy - IN_dy_des)^2 ; 
+%     f = wx*(EE_dx - EE_dx_des)^2 + wy*(EE_dy - EE_dy_des)^2 ;
+    f = wy*(EE_dy - EE_dy_des)^2 ;
     
 end
