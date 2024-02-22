@@ -1,4 +1,4 @@
-function [l_OA, l_AB, l_AC, l_BD, l_CD, l_CE, l_DF, alph, gamma, delta, epsilon] = unpack_vars(vars);
+function [l_OA, l_AB, l_AC, l_BD, l_CD, l_CE, l_DF, alph, gamma, delta, epsilon] = unpack_vars(vars)
 
     l_OA = vars(1);
     l_AB = vars(2);
