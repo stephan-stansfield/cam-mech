@@ -2,8 +2,9 @@
 % not intended to be used by the optimization. instead, takes keypoints 
 % from a generated solution directly
 
-function opt_visualize_single(keypoints)
+function opt_visualize_single(x)
     
+    keypoints = opt_calculate(x);
     [rA1, rB1, rC1, rD1, rE1, rF1, rA2, rB2, rC2, rD2, rE2, rF2] = unpack_keypoints(keypoints);
 
     % Create figure & plotting settings
