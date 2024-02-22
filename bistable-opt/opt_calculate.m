@@ -19,8 +19,7 @@ function keypoints = opt_calculate(vars)
         return
     end
     
-    %% Compute forward kinematics out to end effector and input points for
-    % both solutions
+    %% Compute forward kinematics to EE and input points for both solutions
     
     %% First solution
     % Choose one solution
@@ -30,21 +29,12 @@ function keypoints = opt_calculate(vars)
     % Get keypoints of solved kinematic chain
     [rA1, rB1, rC1, rD1, rE1, rF1] = fun_FK(b, e, vars);
 
-%     % Save coordinates of end effector
-%     rE1 = rE;
-
     %% Second solution
     b = sol_b(2);
     e = sol_eta(2);
     
     % Get keypoints of solved kinematic chain
     [rA2, rB2, rC2, rD2, rE2, rF2] = fun_FK(b, e, vars);
-    
-%     % Print coordinates of end-effector
-%     rE2 = rE;
-
-    % Return end effector coordinates of both solutions in an array
-%     EE = [rE1 rE2];
 
     % Return keypoints of both solutions in a multi-dim array
     keypoints = [rA1, rB1, rC1, rD1, rE1, rF1;

@@ -12,7 +12,7 @@ function [cineq, ceq] = opt_constraints(vars)
     % returns x- and y-coordinates of the two solutions in an array. If a
     % solution doesn't exist, returns same-sized array of zeros.
     keypoints = opt_calculate(vars);
-    [rA1, rB1, rC1, rD1, rE1, rF1, rA2, rB2, rC2, rD2, rE2, rF2] = unpack_keypoints(keypoints);
+    [r_A1, r_B1, r_C1, r_D1, r_E1, r_F1, ~, ~, r_C2, r_D2, r_E2, r_F2] = unpack_keypoints(keypoints);
 
     % Evaluate constraints
     % Overall motion envelope constraints
@@ -27,9 +27,8 @@ function [cineq, ceq] = opt_constraints(vars)
     EE_y_1 = keypoints(2, 5);
     EE_y_2 = keypoints(4, 5);
     EE_dx = keypoints(3,5) - keypoints(1,5);
-%     EE_dy = keypoints(4,5) - keypoints(2,5);
-    D_cable = 1/16 * 25.4; % 1/16" diameter cable
-    scale_groove = 1.50; % groove diameter is 150% larger than cable diameter
+    D_cable = 1/16 * 25.4;  % 1/16" diameter cable
+    scale_groove = 1.50;    % groove diameter is 150% larger than cable diameter
     D_groove = scale_groove * D_cable;
     EE_dx_min = 2*D_groove; % preserve one groove width between grooves
     EE_dx_max = 4*D_groove; % have at most three widths between grooves
@@ -43,7 +42,7 @@ function [cineq, ceq] = opt_constraints(vars)
     IN_dx = IN_x_2 - IN_x_1;
 
     % Intersection with wall constraint
-    m = (rB1(2) - rA1(2)) / (rB1(1) - rA1(1)); % b is constrained to be at (0,0)
+    m = (r_B1(2) - r_A1(2)) / (r_B1(1) - r_A1(1)); % b is constrained to be at (0,0)
 
 %     % End effector travel goals (mm)
 %     EE_dx_des = 44;
@@ -56,15 +55,16 @@ function [cineq, ceq] = opt_constraints(vars)
     % Inequality constraints: 
 %     cineq = [ x_env - x_envMax, y_env - y_envMax, EE_dx_min - abs(dx_EE)];      % envelope dimensions are less than limits
 %     cineq = [ x_env - x_envMax, y_env - y_envMax, EE_dx_min - abs(dx_EE),...    % envelope dimensions are less than limits
-%               m*rC1(1) - rC1(2), m*rD1(1) - rD1(2), m*rE1(1) - rE1(2),...   % all points lie to top-right of line between A & B
-%               m*rF1(1) - rF1(2), ...
-%               m*rC2(1) - rC2(2), m*rD2(1) - rD2(2), m*rE2(1) - rE2(2),...   
-%               m*rF2(1) - rF2(2)];
-    cineq = [ x_env - x_envMax, y_env - y_envMax,...                        % envelope dimensions are less than limits
-              m*rC1(1) - rC1(2), m*rD1(1) - rD1(2), m*rE1(1) - rE1(2),...   % all points lie to top-right of line between A & B
-              m*rF1(1) - rF1(2), ...
-              m*rC2(1) - rC2(2), m*rD2(1) - rD2(2), m*rE2(1) - rE2(2),...   
-              m*rF2(1) - rF2(2),...
+%               m*r_C1(1) - r_C1(2), m*r_D1(1) - r_D1(2), m*r_E1(1) - r_E1(2),...   % all points lie to top-right of line between A & B
+%               m*r_F1(1) - r_F1(2), ...
+%               m*r_C2(1) - r_C2(2), m*r_D2(1) - r_D2(2), m*r_E2(1) - r_E2(2),...   
+%               m*r_F2(1) - r_F2(2)];
+    cineq = [ y_env - y_envMax, ...                                         % envelope dimensions are less than limits
+              x_env - x_envMax, ...
+              m*r_C1(1) - r_C1(2), m*r_D1(1) - r_D1(2), m*r_E1(1) - r_E1(2),...   % all points lie to top-right of line between A & B
+              m*r_F1(1) - r_F1(2), ...
+              m*r_C2(1) - r_C2(2), m*r_D2(1) - r_D2(2), m*r_E2(1) - r_E2(2),...   
+              m*r_F2(1) - r_F2(2),...
               dx_IN_min - IN_dx, IN_dy - dy_IN_max, ...                     % input point travel constraints (x minimum, y maximum)
               EE_dx_min - abs(EE_dx), ...                                   % end effector minimum x travel
               abs(EE_dx) - EE_dx_max, ...                                   % end effector maximum x travel

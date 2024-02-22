@@ -4,6 +4,13 @@ tic; % start timing
 
 % Set initial guess for lengths and angles
 % All link lengths in mm
+% l_OA = 5;
+% l_AB = sqrt(2)*5+5;
+% l_AC = 7.5;
+% l_BD = 5;
+% l_CD = 7.5;
+% l_CE = 15;
+% l_DF = 7.5;
 l_OA = 5;
 l_AB = sqrt(2)*5+5;
 l_AC = 5;
@@ -19,19 +26,21 @@ delta = deg2rad(60);
 epsilon = deg2rad(-15);
 
 % initial guess vector:
-v0 = [l_OA, l_AB, l_AC, l_BD, l_CD, l_CE, l_DF, alph, gamma, delta, epsilon];
-
+x0 = [l_OA, l_AB, l_AC, l_BD, l_CD, l_CE, l_DF, alph, gamma, delta, epsilon];
+%%
 % set up and solve nonlinear programming problem
 problem.objective = @(x) opt_objective(x);                      % create anonymous function that returns objective
 problem.nonlcon = @(x) opt_constraints(x);                      % create anonymous function that returns nonlinear constraints
-problem.x0 = v0;                                                % initial guess for decision variables
+problem.x0 = x0;                                                % initial guess for decision variables
 %            [lOA lAB lAC lBD lCD lCE lDF alpha gamma delta epsilon]
 problem.lb = [ 1   1   1   1   2.5 1   1   0     0     0     -0.5]; % lower bound on decision variables
 problem.ub = [ 30  30  30  30  30  50  30  pi    pi    pi    pi ];  % upper bound on decision variables
 problem.Aineq = []; problem.bineq = [];                         % no linear inequality constraints
 problem.Aeq = []; problem.beq = [];                             % no linear equality constraints
-problem.options = optimoptions('fmincon','Display','iter',...
-    'Algorithm','interior-point','EnableFeasibilityMode',true); % set options
+% f_viz = @(keypoints)opt_visualize(keypoints, save);
+problem.options = optimoptions('fmincon','Display','iter-detailed',...
+    'Algorithm','interior-point','EnableFeasibilityMode',true,...
+    'OutputFcn', @opt_visualize, 'OptimalityTolerance', 1.0000e-09); % set options
 problem.solver = 'fmincon';                                     % required
 x = fmincon(problem);                                           % solve nonlinear programming problem
 
@@ -58,8 +67,8 @@ keypoints = opt_calculate(x);
 toc; % stop timing
 
 %% Visualize optimized solution
-opt_visualize(keypoints);
-[rA1, rB1, rC1, rD1, rE1, rF1, rA2, rB2, rC2, rD2, rE2, rF2] = unpack_keypoints(keypoints);
+% opt_visualize(x, struct([]), []); % superseded; all iterations are saved
+[r_A1, r_B1, r_C1, r_D1, r_E1, r_F1, r_A2, r_B2, r_C2, r_D2, r_E2, r_F2] = unpack_keypoints(keypoints);
 
 EEdx = keypoints(3, 5) - keypoints(1, 5);
 EEdy = keypoints(4, 5) - keypoints(2, 5);
@@ -73,8 +82,15 @@ EEdy_des = 11.5;
 diff_x = EEdx - EEdx_des;
 diff_y = EEdy - EEdy_des;
 
+% Calculate envelope dimensions
+x_array = horzcat(keypoints(1,:), keypoints(3,:)); % x-coordinates of all points of all joints
+y_array = horzcat(keypoints(2,:), keypoints(4,:)); % y-coordinates of all points of all joints
+x_env = max(x_array) - min(x_array);
+y_env = max(y_array) - min(y_array);
+
 %% Save workspace variables to file
-date = "2024-02-01";
+% date = "2024-02-21";
+date = string(datetime('today', 'Format', 'yyyy-MM-dd'));
 save(strcat("soln_values_", date))
 
 

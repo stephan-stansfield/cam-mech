@@ -1,13 +1,19 @@
-function opt_visualize(keypoints)
+function stop = opt_visualize(x, optimValues, state)
 
     close all;
 
+    stop = false;
+    
+    keypoints = opt_calculate(x);
     [rA1, rB1, rC1, rD1, rE1, rF1, rA2, rB2, rC2, rD2, rE2, rF2] = unpack_keypoints(keypoints);
 
-    % Create plotting handles & settings
-    figure(1);
+    % Create figure & plotting settings
+    fig = figure ();
+    drawnow;
+    MP = get(0, 'MonitorPositions');
+    pos = get(fig, 'Position');
+    set(fig, 'Position', [pos(1:2) + MP(2, 1:2), pos(3:4)]);
     hold on;
-    axlim = 50;
     margin = 5;
     xArray = horzcat(keypoints(1,:), keypoints(3,:)); % x-coordinates of all points of all joints
     yArray = horzcat(keypoints(2,:), keypoints(4,:)); % y-coordinates of all points of all joints
@@ -90,14 +96,24 @@ function opt_visualize(keypoints)
 
     % Label keypoints
     xtxt = [0, rA1(1), rB1(1), rC1(1), rD1(1), rE1(1), rF1(1), ...
-        rC2(1), rD2(1), rE2(1), rF2(1)];
+        rC2(1), rE2(1), rF2(1)];
     ytxt = [0, rA1(2), rB1(2), rC1(2), rD1(2), rE1(2), rF1(2), ...
         rC2(2), rD2(2), rE2(2), rF2(2)];
-    str = {'O', 'A', 'B', 'C1', 'D1', 'E1', 'F1', 'C2', 'D2', 'E2', 'F2'};
+    str = {'O', 'A', 'B', 'C1', 'D', 'E1', 'F1', 'C2', 'E2', 'F2'};
     text(xtxt,ytxt,str);
 
     hold off;
 
+    % Save figure
+    dir = strcat('images/', string(datetime('today', 'Format', 'yyyy-MM-dd')), '/');
+    if ~exist(dir, 'dir')
+        mkdir(dir);
+    end
+    iter = optimValues.iteration;
+    saveas(fig, strcat(dir, num2str(iter), '.png'))
+    close(fig)
+
+    %{
     %% individual figures
     % plot first figure alone
     figure(2);
@@ -183,5 +199,6 @@ function opt_visualize(keypoints)
     text(xtxt,ytxt,str);
 
     hold off;
+    %}
 
 end
