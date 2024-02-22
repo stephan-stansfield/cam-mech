@@ -98,7 +98,7 @@ function stop = opt_visualize(x, optimValues, state)
     xtxt = [0, rA1(1), rB1(1), rC1(1), rD1(1), rE1(1), rF1(1), ...
         rC2(1), rE2(1), rF2(1)];
     ytxt = [0, rA1(2), rB1(2), rC1(2), rD1(2), rE1(2), rF1(2), ...
-        rC2(2), rD2(2), rE2(2), rF2(2)];
+        rC2(2), rE2(2), rF2(2)];
     str = {'O', 'A', 'B', 'C1', 'D', 'E1', 'F1', 'C2', 'E2', 'F2'};
     text(xtxt,ytxt,str);
 
