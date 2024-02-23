@@ -104,15 +104,6 @@ function opt_visualize_single(x)
 
     hold off;
 
-    % Save figure
-    dir = strcat('images/', string(datetime('today', 'Format', 'yyyy-MM-dd')), '/');
-    if ~exist(dir, 'dir')
-        mkdir(dir);
-    end
-    iter = optimValues.iteration;
-    saveas(fig, strcat(dir, num2str(iter), '.png'))
-    close(fig)
-
     %{
     %% individual figures
     % plot first figure alone
