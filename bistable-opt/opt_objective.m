@@ -35,7 +35,7 @@ function f = opt_objective(vars)
 %     f = wx*(EE_dx - EE_dx_des)^2 + wy*(EE_dy - EE_dy_des)^2 + ...               
 %         wx*(IN_dx - IN_dx_des)^2 + wy*(IN_dy - IN_dy_des)^2 ; 
 %     f = wx*(EE_dx - EE_dx_des)^2 + wy*(EE_dy - EE_dy_des)^2 ;
-%     f = wy*(EE_dy - EE_dy_des)^2;                                           % y-distance of end effector only
-    f = wy*(EE_dy - EE_dy_des)^2 + wx*(x_env)^2;                            % y-distance of end effector + x-envelope
+    f = wy*(EE_dy - EE_dy_des)^2;                                           % y-distance of end effector only
+%     f = wy*(EE_dy - EE_dy_des)^2 + wx*(x_env)^2;                            % y-distance of end effector + x-envelope
     
 end

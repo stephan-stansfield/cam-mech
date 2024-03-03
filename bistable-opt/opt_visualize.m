@@ -10,9 +10,9 @@ function stop = opt_visualize(x, optimValues, state)
     % Create figure & plotting settings
     fig = figure ();
     drawnow;
-    MP = get(0, 'MonitorPositions');
-    pos = get(fig, 'Position');
-    set(fig, 'Position', [pos(1:2) + MP(2, 1:2), pos(3:4)]);
+%     MP = get(0, 'MonitorPositions');
+%     pos = get(fig, 'Position');
+%     set(fig, 'Position', [pos(1:2) + MP(2, 1:2), pos(3:4)]);
     hold on;
     margin = 5;
     xArray = horzcat(keypoints(1,:), keypoints(3,:)); % x-coordinates of all points of all joints

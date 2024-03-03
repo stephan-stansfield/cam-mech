@@ -89,7 +89,7 @@ x_env = max(x_array) - min(x_array);
 y_env = max(y_array) - min(y_array);
 
 %% Save workspace variables to file
-% date = "2024-02-21";
+% date = "2024-03-03";
 date = string(datetime('today', 'Format', 'yyyy-MM-dd'));
 save(strcat("soln_values_", date))
 
