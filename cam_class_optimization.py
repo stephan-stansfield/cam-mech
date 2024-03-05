@@ -6,6 +6,7 @@ from scipy import interpolate
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
 import matplotlib
 from scipy.interpolate import make_interp_spline, BSpline
+import math
 
 font = {
     'size'   : 14}
@@ -44,23 +45,52 @@ class CamGeneration:
         self.outer_pts = None
 
     def calc_radii_convex_cams(self,inner_pts,outer_pts):
-        new_radii = [[],[]]
+        print("in calc_radii_convex_cams")
+        # new_radii = [[],[]]
+        new_inner_radii = np.empty(inner_pts.shape[0])
+        new_outer_radii = np.empty(outer_pts.shape[0])
+
+        print("shapes of new_inner_radii and new_outer_radii:")
+        print(np.shape(new_inner_radii))
+        print(np.shape(new_outer_radii))
+
+        ind = 0
         for point in inner_pts:
             dist = np.linalg.norm(point)
-            new_radii[0].append(dist)
-        for point_outer in outer_pts:
-            dist = np.linalg.norm(point_outer)
-            new_radii[1].append(dist)
-        return np.array(new_radii)
+            new_inner_radii[ind] = dist
+            ind += 1
+            # DEBUG
+            # print("point: ", point)
+            # print("dist: ", dist)
+
+
+        ind = 0
+        for point in outer_pts:
+            dist = np.linalg.norm(point)
+            new_outer_radii[ind] = dist
+            ind += 1
+
+        print("shapes of new_inner_radii and new_outer_radii:")
+        print(np.shape(new_inner_radii))
+        print(np.shape(new_outer_radii))
+
+        return new_inner_radii, new_outer_radii
 
     def get_convex_hull_angles(self,inner_pts=None,outer_pts=None):
         
-        inner_angles = np.arctan2(self.inner_pts[:,0],self.inner_pts[:,1]) + np.pi
-        outer_angles = np.arctan2(self.outer_pts[:,0],self.outer_pts[:,1]) + np.pi
+        inner_angles = np.arctan2(inner_pts[:,1],inner_pts[:,0]) + np.pi # STS: why add pi?
+        outer_angles = np.arctan2(outer_pts[:,1],outer_pts[:,0]) + np.pi
+
+        # DEBUG
+        # for point in inner_pts:
+        #     dist = np.linalg.norm(point)
+        #     angle = np.arctan2(point[1], point[0])
+        #     print("Point: ", point)
+        #     print("dist: ", dist)
+        #     print("angle: ", angle)
+        #     print("----")
     
-        return np.array([inner_angles,outer_angles])
-
-
+        return np.array([inner_angles]).flatten(), np.array([outer_angles]).flatten()
         
     def calculate_cam_radii(self, kind='cubic',stroke=np.pi):
         '''
@@ -82,6 +112,10 @@ class CamGeneration:
         self.cam_radii = np.append(self.cam_radii, self.cam_radii[:2, :], axis=0)
         self.input_angles = np.append(self.input_angles, 2 * np.pi + self.input_angles[0:2])
 
+        print("pre-convex cam_radii: ")
+        print(type(self.cam_radii))
+
+
         # after generating the points for each cam, interpolate spline curves between them
         self.interpolate(kind=kind)
         
@@ -93,55 +127,123 @@ class CamGeneration:
         R = R * ratio
         self.inner_pts = np.array([r * np.cos(self.angles), r * np.sin(self.angles)]).T
         self.outer_pts = np.array([R * np.cos(self.angles - np.pi / 2), R * np.sin(self.angles - np.pi / 2)]).T
+        
+        # redefine points as convex hull of cam shape
         self.convex_cam_pts()
-
-        plt.scatter(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
+        """        plt.scatter(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
         plt.scatter(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
         plt.title('after convex function plot')
-        plt.show()
+        plt.show() """
 
-        
-        #inner_x_new = np.linspace(self.inner_pts[:,0].min(), self.inner_pts[:,0].max(), 500)
-        # plt.scatter(inner_x_new,inner_cam(inner_x_new))
+        # plot convex points and convert line plot into data
         curve_inner, = plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
         curve_outer,= plt.plot(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
-        # inner_x_new,inner_y_new = curve_inner.get_data(False)
-        # plt.scatter(inner_x_new,inner_y_new)
-        # print(curve_inner.get_data(False))
         xdata_inner,ydata_inner = curve_inner.get_xdata(orig=False),curve_inner.get_ydata(orig=False)
         xdata_outer,ydata_outer = curve_outer.get_xdata(orig=False),curve_outer.get_ydata(orig=False)
-        inner_pts = np.array([xdata_inner,ydata_inner]).reshape((-1,2))
-        outer_pts = np.array([xdata_outer,ydata_outer]).reshape((-1,2))
-        plt.scatter(xdata_outer,ydata_outer)
+        inner_pts = np.array([xdata_inner,ydata_inner]).T 
+        outer_pts = np.array([xdata_outer,ydata_outer]).T
+        '''
+        plt.scatter(xdata_outer,ydata_outer) # plot data taken from plot to check
         plt.scatter(xdata_inner,ydata_inner)
+        plt.scatter(inner_pts[:,0], inner_pts[:,1]) # plot re-defined points to check. Should match the above plots
+        plt.scatter(outer_pts[:,0], outer_pts[:,1])
         plt.title('plotly connected cams')
         plt.scatter([0],[0],c='r')
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
         plt.show()
-        
+        '''
 
-        print('XDATA',np.vstack((xdata_outer,ydata_outer)).reshape((-1,2)))
-        
-        
+        # split cam points into 3 segments that each monotonically increase or decrease in x
+        break_ind = []
+        # print("len(inner_pts): ", len(inner_pts))
+        for i in range(len(inner_pts)-2):
+            # print("i: ", i)
+            # in_pts = inner_pts[i:i+2,0]
+            # print("in_pts: ", in_pts)
+            # diff = np.diff(inner_pts[i:i+2,0])
+            # print("diff: ", diff)
+            if math.copysign(1, np.diff(inner_pts[i:i+2,0])) != math.copysign(1, np.diff(inner_pts[i+1:i+3,0])):
+                break_ind.append(i+2)
+        inner_array = []
+        inner_array.append(inner_pts[:break_ind[0],:])
+        inner_array.append(inner_pts[break_ind[0]:break_ind[1],:])
+        inner_array.append(inner_pts[break_ind[1]:,:])
 
+        """ print("inner_array_1: ", inner_array_1)
+        print("inner_array_2: ", inner_array_2)
+        print("inner_array_3: ", inner_array_3) """
 
-        new_radii = self.calc_radii_convex_cams(inner_pts,outer_pts)
-        new_angle_coords = self.get_convex_hull_angles(inner_pts=inner_pts,outer_pts=outer_pts)
-        sorted_angle_indeces_inner = np.argsort(new_angle_coords[0])
-        # print(sorted_angle_indeces_inner,new_angle_coords[0])
-        # print(new_radii[0].shape,sorted_angle_indeces_inner.shape)
+        ind = 0
+        # flip_array = np.zeros(3)
+        for array in inner_array:
+            # print("ind:", ind)
+            # print("DIFF ARRAY: ", np.diff(array[:,0]))
+            if not np.all(np.diff(array[:,0]) > 0):
+                # print("array flipped!")
+                inner_array[ind] = np.flip(inner_array[ind], 0)
+            ind += 1
 
-        # print('HERE',min(new_angle_coords[0]),max(new_angle_coords[1]))
-        inner_cam = interpolate.interp1d(sorted(new_angle_coords[0]), np.array(new_radii[0])[sorted_angle_indeces_inner], kind='linear',fill_value="extrapolate")
-        outer_cam = interpolate.interp1d(new_angle_coords[1], new_radii[1], kind='linear',fill_value="extrapolate")
+        # print("FLIPPED INNER ARRAY:", inner_array)
+
+        break_ind = []
+        for i in range(len(outer_pts)-2):
+            if math.copysign(1, np.diff(outer_pts[i:i+2,0])) != math.copysign(1, np.diff(outer_pts[i+1:i+3,0])):
+                break_ind.append(i+2)
+        outer_array = []
+        outer_array.append(outer_pts[:break_ind[0],:])
+        outer_array.append(outer_pts[break_ind[0]:break_ind[1],:])
+        outer_array.append(outer_pts[break_ind[1]:,:])
+
+        ind = 0
+        for array in outer_array:
+            if not np.all(np.diff(array[:,0]) > 0):
+                outer_array[ind] = np.flip(outer_array[ind], 0)
+            ind += 1
+
+        # linearly interpolate between points in the 3 sub-arrays for each cam
+        x_int = np.linspace(inner_array[0][0,0], inner_array[0][-1,0], len(inner_array[0]))
+        y_int_inner_1 = np.interp(x_int, inner_array[0][:,0], inner_array[0][:,1])
+        interp_array = [x_int, y_int_inner_1]
+        print("interpolated array 1: ", interp_array)
+        interp_array = np.reshape(interp_array, (-1, 2))
+        print("RESHAPED interpolated array 1: ", interp_array)
+        print("SHAPE of interped array: ", np.shape(interp_array))
+
+        # convert convex cam points into polar coordinates
+        new_radii = self.calc_radii_convex_cams(inner_pts,outer_pts) # returns tuple of 2 ndarrays
+        new_angles = self.get_convex_hull_angles(inner_pts, outer_pts) # returns a tuple of 2 ndarrays
+        '''print("new_angles: ", new_angles)'''
+        sorted_angle_indices_inner = np.argsort(new_angles[0]) # STS: do we need to sort? doesn't make sense to me because the radii are unsorted. radii and angles need to align
+
+        print("shape of inner angles: ", np.shape(new_angles[0]))
+        print("shape of outer angles: ", np.shape(new_angles[1]))
+
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        # ax.plot(new_angles[0], new_radii[0]) # inner cam # STS commented & added net 2 lines
+        # ax.plot(new_angles[1], new_radii[1]) # outer cam
+        ax.scatter(new_angles[0], new_radii[0]) # inner cam
+        ax.scatter(new_angles[1], new_radii[1]) # outer cam
+        ax.set_rticks([2, 4, 6, 8, 10])
+        ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
+        ax.grid(True)
+        ax.set_title('radii and angles before interpolation')
+
+        # interpolate between points in polar coordinates
+        inner_cam_fcn = interpolate.interp1d(new_angles[0], new_radii[0], kind='linear',fill_value="extrapolate")
+        outer_cam_fcn = interpolate.interp1d(new_angles[1], new_radii[1], kind='linear',fill_value="extrapolate")
         
-        self.new_cam_radii = np.vstack((inner_cam(self.angles), outer_cam(self.angles))).T
-        # print(self.new_cam_radii.shape)
+        self.new_cam_radii = np.vstack((inner_cam_fcn(self.angles), outer_cam_fcn(self.angles))).T # get radii of convex cams at regularly-spaced angles
+        print("shape of new_cam_radii: ", self.new_cam_radii.shape)
+
         r = self.new_cam_radii[:, 0]
         R = self.new_cam_radii[:, 1]
+
+        """ print("r: ", r)
+        print("R: ", R) """
+
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.plot(self.angles - np.pi / 2, R )  # apply phase change to the outer cam
         ax.plot(self.angles, r)
@@ -183,10 +285,10 @@ class CamGeneration:
         '''
         print(self.input_angles)
 
-        inner_cam = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind)
-        outer_cam = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind)
+        inner_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind)
+        outer_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind)
 
-        self.cam_radii = np.vstack((inner_cam(self.angles), outer_cam(self.angles))).T
+        self.cam_radii = np.vstack((inner_cam_fcn(self.angles), outer_cam_fcn(self.angles))).T
 
     def cam_pts(self, stroke=np.pi, convex=True):
         r = self.cam_radii[:, 0]
@@ -206,20 +308,20 @@ class CamGeneration:
 
     def convex_cam_pts(self):
         inner_hull = ConvexHull(self.inner_pts,incremental=True)
-        print('IN CONVEX FUNC',inner_hull.points[inner_hull.vertices])
-        plt.scatter(inner_hull.points[inner_hull.vertices][:,0],inner_hull.points[inner_hull.vertices][:,1])
-        plt.title('in function')
-        plt.show()
+        # print('IN CONVEX FUNC',inner_hull.points[inner_hull.vertices])
+        """ plt.scatter(inner_hull.points[inner_hull.vertices][:,0],inner_hull.points[inner_hull.vertices][:,1])
+        plt.title('Inner hull points (in convex_cam_pts function)')
+        plt.show() """
         outer_hull = ConvexHull(self.outer_pts,incremental=True)
         self.inner_pts = np.vstack((self.inner_pts[inner_hull.vertices, 0], self.inner_pts[inner_hull.vertices, 1])).T
         self.outer_pts = np.vstack((self.outer_pts[outer_hull.vertices, 0], self.outer_pts[outer_hull.vertices, 1])).T
 
-        plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
+        """ plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
         plt.plot(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
-        plt.title('in convex function plot')
-        plt.show()
+        plt.title('Inner & outer points (in convex_cam_pts function)')
+        plt.show() """
         
 
     def alter_cam_profiles(self, routing=None):
@@ -278,7 +380,6 @@ class CamGeneration:
         # scale cable displacement and radii to match stroke length
         x_c = np.cumsum(r * 2 * np.pi / self.ninterp) # cable displacement distance
         ratio = stroke / x_c[self.sit_ind] # ratio of stroke length to unscaled displacement at sitting index
-        
         x_c = x_c * ratio
         r = r * ratio
         R = R * ratio
