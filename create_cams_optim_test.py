@@ -25,9 +25,8 @@ initial_gr = 0.5 # initial overall gear ratio, inner cam/outer cam
 # sit angle is input in radians.
 Cam = CamGeneration(gear_ratios.T, initial_gr, sit_angle = np.pi * 220 / 180)
 
-# take the max of this. STS: why?? 1. why the max 2. why do we care about the sum of the max radii? not just the absolute max?
-R_plus_r = Cam.calculate_cam_radii() 
-
+# calculate the convex hull of the cams and get its max radius
+max_radius = Cam.calculate_cam_radii() 
 
 # calculate cable force using knee angle data
 filename = 'data/Knee-angle_Chugo_2006.csv'
@@ -43,8 +42,8 @@ sitting_force = forces[sitting_perc_ind]
 
 print("All index value of 32.3 is: ", ideal_perc_force)
 print('force at 32.3% = ',ideal_perc_force, 'max force of', max_force,' at ',max_force_perc, ' %')
-print('max radii sum = ',R_plus_r)
-print(f'sitting force {sitting_force}')
+print('envelope = ', 2 * max_radius)
+print(f'sitting force: {sitting_force}')
 
 # inner_pts, outer_pts = Cam.cam_pts(stroke=0.1) # output arrays of point coordinates (X, Y, Z) on perimeter of cams
 # np.savetxt('inner.txt', np.append(inner_pts, np.zeros((inner_pts.shape[0], 1)) * 1000, axis = 1), delimiter = ',')  # mm
