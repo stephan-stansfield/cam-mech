@@ -100,8 +100,8 @@ class CamGeneration:
         self.cam_radii = np.append(self.cam_radii, self.cam_radii[:2, :], axis=0)
         self.input_angles = np.append(self.input_angles, 2 * np.pi + self.input_angles[0:2])
 
-        print("pre-convex cam_radii: ")
-        print(type(self.cam_radii))
+        # print("pre-convex cam_radii: ")
+        # print(type(self.cam_radii))
 
         # after generating the points for each cam, interpolate spline curves between them
         self.interpolate(kind=kind)
@@ -115,12 +115,12 @@ class CamGeneration:
         self.inner_pts = np.array([r * np.cos(self.angles), r * np.sin(self.angles)]).T
         self.outer_pts = np.array([R * np.cos(self.angles - np.pi / 2), R * np.sin(self.angles - np.pi / 2)]).T
 
-        plt.scatter(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
+        """ plt.scatter(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
         plt.scatter(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
         plt.title('before convex function plot')
-        plt.show()
+        plt.show() """
         
         # redefine points as convex hull of cam shape
         self.convex_cam_pts()
@@ -192,24 +192,24 @@ class CamGeneration:
             else:
                 interp_outer = np.concatenate((interp_outer, np.array([x_outer, y_outer]).T))
 
-        plt.scatter(interp_inner[:,0], interp_inner[:,1])
+        """ plt.scatter(interp_inner[:,0], interp_inner[:,1])
         plt.scatter(interp_outer[:,0], interp_outer[:,1])
         plt.title('Interpolated convex cam points')
         plt.legend(['Inner cam', 'Outer cam'])
         plt.axis('equal')
-        plt.show()
+        plt.show() """
 
         # convert convex cam points into polar coordinates
         new_radii = self.calc_radii_convex_cams(interp_inner, interp_outer) # returns tuple of 2 ndarrays
         new_angles = self.get_convex_hull_angles(interp_inner, interp_outer) # returns a tuple of 2 ndarrays
 
-        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        """ fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.scatter(new_angles[0], new_radii[0]) # inner cam
         ax.scatter(new_angles[1], new_radii[1]) # outer cam
         ax.set_rticks([2, 4, 6, 8, 10])
         ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
         ax.grid(True)
-        ax.set_title('radii and angles before interpolation')
+        ax.set_title('radii and angles before interpolation') """
 
         # interpolate between points in polar coordinates
         inner_cam_fcn = interpolate.interp1d(new_angles[0], new_radii[0], kind='linear',fill_value="extrapolate")
@@ -220,13 +220,13 @@ class CamGeneration:
         r = self.cam_radii[:, 0]
         R = self.cam_radii[:, 1]
 
-        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        """ fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.plot(self.angles - np.pi, r)
         ax.plot(self.angles - (3*np.pi/2), R )  # apply phase change to the outer cam
         ax.set_rticks([2, 4, 6, 8, 10])
         ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
         ax.grid(True)
-        ax.set_title('interpolated cam')
+        ax.set_title('interpolated cam') """
 
         # define cam points in Cartesian space after inerpolating in polar coordinates
         # note that phase changes are applied to counteract that in 
@@ -234,12 +234,12 @@ class CamGeneration:
         self.outer_pts = np.array([R * np.cos(self.angles - 3* np.pi / 2), R * np.sin(self.angles - 3 * np.pi / 2)]).T # apply phase change to the outer cam
 
         # check that Cartesian points match polar points
-        plt.figure()
+        """ plt.figure()
         plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
         plt.plot(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
-        plt.show()
+        plt.show() """
 
         # get max radius to use for cam envelope
         max_radius = np.max(self.cam_radii)
@@ -251,7 +251,7 @@ class CamGeneration:
         Interpolate the radii with spline curve, kind = "quadratic or cubic"
         interpolation kind pls refer to https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.interp1d.html#scipy.interpolate.interp1d
         '''
-        print(self.input_angles)
+        # print(self.input_angles)
 
         inner_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind)
         outer_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind)
@@ -277,9 +277,9 @@ class CamGeneration:
     def convex_cam_pts(self):
         inner_hull = ConvexHull(self.inner_pts,incremental=True)
         # print('IN CONVEX FUNC',inner_hull.points[inner_hull.vertices])
-        plt.scatter(inner_hull.points[inner_hull.vertices][:,0],inner_hull.points[inner_hull.vertices][:,1])
+        """ plt.scatter(inner_hull.points[inner_hull.vertices][:,0],inner_hull.points[inner_hull.vertices][:,1])
         plt.title('Inner hull points (in convex_cam_pts function)')
-        plt.show()
+        plt.show() """
         outer_hull = ConvexHull(self.outer_pts,incremental=True)
         self.inner_pts = np.vstack((self.inner_pts[inner_hull.vertices, 0], self.inner_pts[inner_hull.vertices, 1])).T
         self.outer_pts = np.vstack((self.outer_pts[outer_hull.vertices, 0], self.outer_pts[outer_hull.vertices, 1])).T
@@ -314,10 +314,11 @@ class CamGeneration:
         Plots the cam points as a sanity check feature.
         stroke: scalar, full stroke of the pulling cable
         '''
-        if cam_radii.all() == 0:
-            cam_radii = self.cam_radii
-        r = cam_radii[:, 0]
-        R = cam_radii[:, 1]
+        # print("cam_radii: ", cam_radii)
+        # if cam_radii.all() == 0:
+        #     cam_radii = self.cam_radii
+        r = self.cam_radii[:, 0]
+        R = self.cam_radii[:, 1]
         x_c = np.cumsum(r * 2 * np.pi / self.ninterp) 
         ratio = stroke / x_c[self.sit_ind] # full stroke divided by distance along cam perimeter of sitting angle
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
@@ -435,17 +436,17 @@ class CamGeneration:
         
         # plot knee angle vs. cable displacement
         if plot:
-            plt.figure()
+            """ plt.figure()
             plt.plot(knee_angles_flip, xc_knee)
             plt.xlabel('knee angle (degree)')
             plt.ylabel('cable displacement, xc (m)')
-            plt.title('knee angle and cable displacement linear relationship')
+            plt.title('knee angle and cable displacement linear relationship') """
 
-            # plot stance percentage vs. cable displacement
+            """ # plot stance percentage vs. cable displacement
             plt.figure()
             plt.plot(percentage_flip, xc_knee)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Cable Displacement (m)')
+            plt.ylabel('Cable Displacement (m)') """
 
         # add "negative" stance phase to account for part of cam past sitting index
         perc_neg = np.linspace((self.sit_ind - self.ninterp) * (100 / self.sit_ind), -100 / self.sit_ind, self.ninterp - self.sit_ind)
@@ -471,16 +472,16 @@ class CamGeneration:
         ### plot and save values ###
         # plot cam angle vs. stance percentage
         if plot:
-            plt.figure()
+            """ plt.figure()
             plt.plot(percentage_flip, angle_percentage)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Cam Angle (rad)')
+            plt.ylabel('Cam Angle (rad)') """
 
-            # plot elastic band displacement vs. stance percentage
+            """ # plot elastic band displacement vs. stance percentage
             plt.figure()
             plt.plot(percentage_flip, elastic_percentage)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Elastic displacement (m)')
+            plt.ylabel('Elastic displacement (m)') """
             
             # plot cable force vs. stance percentage
             plt.figure()
