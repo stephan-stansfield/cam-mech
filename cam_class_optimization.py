@@ -28,7 +28,8 @@ class CamGeneration:
         Initial guess of inner and outer radii will be 1 and 1/initial_gr, e.g. 1 and 2
         '''
         self.gear_ratios = gear_ratios
-        self.gear_ratios[:, 1] = self.gear_ratios[:, 1] * sit_angle / np.pi # normalize second row of gear ratios to ratio of sit angle to 180 deg
+        self.gear_ratios[:, 1] = self.gear_ratios[:, 1] * sit_angle / np.pi # normalize second column of gear ratios to ratio of sit angle to 180 deg
+        self.gear_ratios[:, 1] = np.sort(self.gear_ratios[:, 1]) # sort gear ratios by angle (in radians)
         self.initial_gr = initial_gr
         self.points = len(self.gear_ratios[:, 0]) # number of points to define on each cam
 
@@ -37,7 +38,7 @@ class CamGeneration:
         # assuming equal distribution of angles for gear ratios
         self.input_angles = self.gear_ratios[:, 1] # take the second row of gear ratios to be the input angles
         self.ninterp = 360 # number of radii points to interpolate between
-        self.sit_ind = round(sit_angle / 2 / np.pi * self.ninterp) # index of sitting position (if ninterp=360, this will also equal the angle along the cam corresponding to sitting)
+        self.sit_ind = round(sit_angle / 2 / np.pi * self.ninterp) # index of sitting position (if ninterp=360, this will also equal the angle in degrees along the cam corresponding to sitting)
 
         self.angles = np.arange(0, self.ninterp + 1, 1) / self.ninterp * 2 * np.pi # create ndarray of radian angles in range [0, ninterp] 
 
@@ -99,6 +100,8 @@ class CamGeneration:
 
         self.cam_radii = np.append(self.cam_radii, self.cam_radii[:2, :], axis=0)
         self.input_angles = np.append(self.input_angles, 2 * np.pi + self.input_angles[0:2])
+        self.cam_radii = np.insert(self.cam_radii, 0, self.cam_radii[-4:-2, :], axis=0)
+        self.input_angles = np.insert(self.input_angles, 0, self.input_angles[-4:-2] - 2 * np.pi)
 
         # print("pre-convex cam_radii: ")
         # print(type(self.cam_radii))
@@ -251,10 +254,13 @@ class CamGeneration:
         Interpolate the radii with spline curve, kind = "quadratic or cubic"
         interpolation kind pls refer to https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.interp1d.html#scipy.interpolate.interp1d
         '''
-        # print(self.input_angles)
+        # DEBUG
+        # print("input angles: ", self.input_angles)
+        # print("inner radii: ", self.cam_radii[:, 0])
+        # print("outer radii: ", self.cam_radii[:, 1])
 
-        inner_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind)
-        outer_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind)
+        inner_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind, fill_value="extrapolate")
+        outer_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind, fill_value="extrapolate")
 
         self.cam_radii = np.vstack((inner_cam_fcn(self.angles), outer_cam_fcn(self.angles))).T
 
