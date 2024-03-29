@@ -1,511 +1,382 @@
-# Using python 3.10
-
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import interpolate
-from scipy.spatial import ConvexHull, convex_hull_plot_2d
-import matplotlib
-from scipy.interpolate import make_interp_spline, BSpline
+"""Using python 3.10"""
 import math
 
-font = {
-    'size'   : 14}
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+from scipy import interpolate
+from scipy.interpolate import make_interp_spline, BSpline
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
+from collections import defaultdict
 
+font = {'size': 14}
 matplotlib.rc('font', **font)
 
+
 class CamGeneration:
-    '''
-    Class that generates points on the cams for
+    """Class that generates points on the cams for
     every degree given torque/gear ratios. 
     Can give energy output given stiffness as well.
-    '''
+    """
     
-    def __init__(self, gear_ratios, initial_gr, sit_angle=np.pi):
-        '''
-        points: number of points to define on cams
-        gear_ratios: points*2 np array          [gear_ratios; angles]
-        initial_gr: scalar, e.g. 0.5            overall gear ratio inner-to-outer
-        Initial guess of inner and outer radii will be 1 and 1/initial_gr, e.g. 1 and 2
-        '''
-        self.gear_ratios = gear_ratios
-        self.gear_ratios[:, 1] = self.gear_ratios[:, 1] * sit_angle / np.pi # normalize second column of gear ratios to ratio of sit angle to 180 deg
-        self.gear_ratios[:, 1] = np.sort(self.gear_ratios[:, 1]) # sort gear ratios by angle (in radians)
-        self.initial_gr = initial_gr
-        self.points = len(self.gear_ratios[:, 0]) # number of points to define on each cam
+    def __init__(self, gear_ratios, input_angles, scaling, sit_angle=np.pi):
+        """points: number of points to define on cams
+        gear_ratios: (points*2)-dim ndarray [gear_ratios; angles]
+        scaling: scalar multiple, e.g. 0.5, to determine overall size of cams
+        """
+        # Sort gear ratios and input angles in ascending order of input angles.
+        sorted_inds = np.argsort(input_angles)
+        self.input_angles = input_angles[sorted_inds]
+        self.input_angles = input_angles * sit_angle / np.pi # SS: don't understand this scaling still...the implicit assumption is that the input angle is pi?
+        self.gear_ratios = gear_ratios[sorted_inds]
 
-        self.cam_radii = np.ones((self.points, 2)) @ np.diag([1, 1/initial_gr])  # initial guess for inner and outer cam radii
+        # Initialize class variables.
+        self.scaling = scaling
+        self.cam_radii = np.ones((self.gear_ratios.shape[0], 2))
+        self.n_interp = 360 
+        self.sit_ind = round(sit_angle * self.n_interp / (2*np.pi))
+        self.angles = np.arange(0, self.n_interp+1, 1) * 2*np.pi / self.n_interp 
+        self.pts_inner = None
+        self.pts_outer = None
+        # self.cam_radii = np.ones((self.points, 2)) @ np.diag([1, 1/scaling])  # initial guess for inner and outer cam radii
+        # self.input_angles = self.gear_ratios[:, 1] # take the second row of gear ratios to be the input angles
 
-        # assuming equal distribution of angles for gear ratios
-        self.input_angles = self.gear_ratios[:, 1] # take the second row of gear ratios to be the input angles
-        self.ninterp = 360 # number of radii points to interpolate between
-        self.sit_ind = round(sit_angle / 2 / np.pi * self.ninterp) # index of sitting position (if ninterp=360, this will also equal the angle in degrees along the cam corresponding to sitting)
-
-        self.angles = np.arange(0, self.ninterp + 1, 1) / self.ninterp * 2 * np.pi # create ndarray of radian angles in range [0, ninterp] 
-
-        self.inner_pts = None
-        self.outer_pts = None
-
-    def calc_radii_convex_cams(self,inner_pts,outer_pts):
-        new_inner_radii = np.empty(inner_pts.shape[0])
-        new_outer_radii = np.empty(outer_pts.shape[0])
-
-        ind = 0
-        for point in inner_pts:
-            dist = np.linalg.norm(point)
-            new_inner_radii[ind] = dist
-            ind += 1
-
-        ind = 0
-        for point in outer_pts:
-            dist = np.linalg.norm(point)
-            new_outer_radii[ind] = dist
-            ind += 1
-
-        return new_inner_radii, new_outer_radii
-
-    def get_convex_hull_angles(self,inner_pts=None,outer_pts=None):
+    def calculate_cam_radii(self, stroke=np.pi, plot=False, index=0):
+        """Calculates the cam radii for each gear ratio and input angle.
+        Determines the convex hull of the given gear ratios and angles, then
+        interpolates between these points to generate the cam radii.
         
-        inner_angles_test = np.arctan2(inner_pts[:,1],inner_pts[:,0])
-        outer_angles_test = np.arctan2(outer_pts[:,1],outer_pts[:,0])
+        Parameters:
+        stroke: scalar, full stroke of the pulling cable
 
-        inner_angles = np.arctan2(inner_pts[:,1],inner_pts[:,0]) + np.pi
-        outer_angles = np.arctan2(outer_pts[:,1],outer_pts[:,0]) + np.pi
-
-        # DEBUG
-        # for point in inner_pts:
-        #     dist = np.linalg.norm(point)
-        #     angle = np.arctan2(point[1], point[0])
-        #     print("Point: ", point)
-        #     print("dist: ", dist)
-        #     print("angle: ", angle)
-        #     print("----")
-    
-        return np.array([inner_angles]).flatten(), np.array([outer_angles]).flatten()
+        Returns:
+        pts_inner: ndarray, inner cam points in Cartesian space
+        pts_outer: ndarray, outer cam points in Cartesian space
+        radius_max: scalar maximum radius of the cam envelopes
+        """
         
-    def calculate_cam_radii(self, kind='cubic',stroke=np.pi):
-        '''
-        Calculates the points on a single cam given the gear ratios.
-        '''
+        # Calculate initial cam sizes using gear ratios and scaling factor.
+        r_min = 0.5
+        for ind, ratio in enumerate(self.gear_ratios):
+            # r = self.scaling * np.sqrt(ratio) * self.cam_radii[ind, 0]
+            # R = self.scaling * self.cam_radii[ind, 1] / np.sqrt(ratio)
+            [r, R] = self.scaling * np.array([np.sqrt(ratio), 1/np.sqrt(ratio)])
+            if r < r_min:
+                r = r_min
+                R = r_min / ratio
+            self.cam_radii[ind, :] = np.array([r, R])
+            # self.cam_radii[ind, 1] = R
+
+        # Pad arrays to ensure continuity and then interpolate between points.
+        self.cam_radii = np.append(self.cam_radii, self.cam_radii[: 2, :],
+                                   axis=0)
+        self.input_angles = np.append(self.input_angles,
+                                      self.input_angles[0 : 2] + 2*np.pi)
+        self.cam_radii = np.insert(self.cam_radii, 0, self.cam_radii[-4 : -2, :],
+                                   axis = 0)
+        self.input_angles = np.insert(self.input_angles, 0,
+                                       self.input_angles[-4 : -2] - 2*np.pi)
+        cam_fcn_inner = interpolate.interp1d(self.input_angles,
+                                             self.cam_radii[:, 0],
+                                             kind='cubic',
+                                             fill_value='extrapolate')
+        cam_fcn_outer = interpolate.interp1d(self.input_angles,
+                                             self.cam_radii[:, 1],
+                                             kind='cubic',
+                                             fill_value='extrapolate')
+        self.cam_radii = np.vstack((cam_fcn_inner(self.angles),
+                                    cam_fcn_outer(self.angles))).T
         
-        r_lim = 0.5        # after interpolation, the r_min will be lower than r_lim
-        for i in range(self.points): # for all the defined points on a cam
-            m = self.gear_ratios[i, 0] # / self.initial_gr # normalize input to initial gear ratio
-            r = np.sqrt(m) * self.cam_radii[i, 0] # smaller cam radii
-            R = self.cam_radii[i, 1] / np.sqrt(m) # larger cam radii
-            if r < r_lim:
-                r = r_lim #* self.cam_radii[i, 0]
-                R = r_lim/m# * self.cam_radii[i, 1] / m
-            self.cam_radii[i, 0] = r
-            self.cam_radii[i, 1] = R
+        if np.any(np.isnan(self.cam_radii)):
+            print("Warning: NaN in cam radii")
 
-        self.cam_radii = np.append(self.cam_radii, self.cam_radii[:2, :], axis=0)
-        self.input_angles = np.append(self.input_angles, 2 * np.pi + self.input_angles[0:2])
-        self.cam_radii = np.insert(self.cam_radii, 0, self.cam_radii[-4:-2, :], axis=0)
-        self.input_angles = np.insert(self.input_angles, 0, self.input_angles[-4:-2] - 2 * np.pi)
-
-        # print("pre-convex cam_radii: ")
-        # print(type(self.cam_radii))
-
-        # after generating the points for each cam, interpolate spline curves between them
-        self.interpolate(kind=kind)
+        # Define cam points in Cartesian space.
+        # SS: do we need the phase change here?
+        # self.pts_inner = np.array([self.cam_radii[:, 0] * np.cos(self.angles),
+        #                            self.cam_radii[:, 0] * np.sin(self.angles)]).T
+        # self.pts_outer = np.array([R * np.cos(self.angles - np.pi / 2), R * np.sin(self.angles - np.pi / 2)]).T
+        self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
+                                                  np.sin(self.angles)
+                                                  ]).T
+        self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.angles - np.pi/2),
+                                                  np.sin(self.angles - np.pi/2)
+                                                  ]).T
+        if plot:
+            plt.scatter(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
+            plt.scatter(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
+            plt.legend(['inner cam','outer cam'])
+            plt.axis('equal')
+            plt.title('before convex function plot')
+            plt.show()
         
-        r = self.cam_radii[:, 0]
-        R = self.cam_radii[:, 1]
-        x_c = np.cumsum(r * 2 * np.pi / self.ninterp)
-        ratio = stroke / x_c[self.sit_ind]
-        r = r * ratio
-        R = R * ratio
-        self.inner_pts = np.array([r * np.cos(self.angles), r * np.sin(self.angles)]).T
-        self.outer_pts = np.array([R * np.cos(self.angles - np.pi / 2), R * np.sin(self.angles - np.pi / 2)]).T
+        # Calculate points of convex hull for each cam.
+        self.cam_radii[:, 0] = self.convex_cam_pts(self.pts_inner, plot)
+        self.cam_radii[:, 1] = self.convex_cam_pts(self.pts_outer, plot)
 
-        """ plt.scatter(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
-        plt.scatter(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
-        plt.legend(['inner cam','outer cam'])
-        plt.axis('equal')
-        plt.title('before convex function plot')
-        plt.show() """
-        
-        # redefine points as convex hull of cam shape
-        self.convex_cam_pts()
+        if np.any(np.isnan(self.cam_radii)):
+            print("Warning: NaN in cam radii")
 
-        # split cam points into 3 segments that each monotonically increase or decrease in x
-        break_ind = []
-        for i in range(len(self.inner_pts)-2):
-            if math.copysign(1, np.diff(self.inner_pts[i:i+2,0])) != math.copysign(1, np.diff(self.inner_pts[i+1:i+3,0])):
-                break_ind.append(i+2)
-        inner_array = []
-        inner_array.append(self.inner_pts[:break_ind[0],:])
-        if len(break_ind) == 2:
-            inner_array.append(self.inner_pts[break_ind[0]:break_ind[1],:])
-            inner_array.append(self.inner_pts[break_ind[1]:,:])
-        elif len(break_ind) == 1:
-            inner_array.append(self.inner_pts[break_ind[0]:,:])
+        if plot:
+            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+            ax.plot(self.angles - np.pi, self.cam_radii[:, 0])
+            ax.plot(self.angles - (3*np.pi/2), self.cam_radii[:, 1] )  # apply phase change to the outer cam
+            ax.set_rticks([2, 4, 6, 8, 10])
+            ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
+            ax.grid(True)
+            ax.set_title('interpolated cam')
 
-        break_ind = []
-        for i in range(len(self.outer_pts)-2):
-            if math.copysign(1, np.diff(self.outer_pts[i:i+2,0])) != math.copysign(1, np.diff(self.outer_pts[i+1:i+3,0])):
-                break_ind.append(i+2)
-        outer_array = []
-        outer_array.append(self.outer_pts[:break_ind[0],:])
-        if len(break_ind) == 2:
-            outer_array.append(self.outer_pts[break_ind[0]:break_ind[1],:])
-            outer_array.append(self.outer_pts[break_ind[1]:,:])
-        elif len(break_ind) == 1:
-            outer_array.append(self.outer_pts[break_ind[0]:,:])
+        # Define cam points in Cartesian space after interpolating in polar
+        # coordinates. Apply phase changes to counteract that made above
+        # SS: do we need both...?
+        self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles - np.pi),
+                                                 np.sin(self.angles - np.pi)
+                                                 ]).T
+        self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.angles - 3*np.pi/2),
+                                                  np.sin(self.angles - 3*np.pi/2)
+                                                  ]).T
 
-        # make sure all segments are monotonically increasing (requirement of numpy.interp())
-        ind = 0
-        for array in inner_array:
-            if not np.all(np.diff(array[:,0]) > 0):
-                inner_array[ind] = np.flip(inner_array[ind], 0)
-            ind += 1
+        # Check that Cartesian points match polar points.
+        if plot:
+            plt.figure()
+            plt.plot(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
+            plt.plot(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
+            plt.legend(['inner cam','outer cam'])
+            plt.axis('equal')
+            plt.show()
 
-        ind = 0
-        for array in outer_array:
-            if not np.all(np.diff(array[:,0]) > 0):
-                outer_array[ind] = np.flip(outer_array[ind], 0)
-            ind += 1
+        # Scale cam size to desired stroke length
+        self.x_cable = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
+        ratio = stroke / self.x_cable[self.sit_ind]
+        self.cam_radii *= ratio
+        radius_max = np.max(self.cam_radii)
+        if plot:
+            self.plot_cams(self.cam_radii, stroke, index)
+        return self.pts_inner, self.pts_outer, radius_max
 
-        # linearly interpolate between points in the 3 sub-arrays for each cam
-        # for i in range(len(break_ind)+1):
-        #     print("i = ", i)
-        #     print("inner_array length: ", len(inner_array))
-        #     x_inner = np.linspace(inner_array[i][0,0], inner_array[i][-1,0], len(inner_array[i]))
-        #     y_inner = np.interp(x_inner, inner_array[i][:,0], inner_array[i][:,1])
-        #     x_outer = np.linspace(outer_array[i][0,0], outer_array[i][-1,0], len(outer_array[i]))
-        #     y_outer = np.interp(x_outer, outer_array[i][:,0], outer_array[i][:,1])
-        #     if i == 0:
-        #         interp_inner = np.array([x_inner, y_inner]).T
-        #         interp_outer = np.array([x_outer, y_outer]).T
-        #     else:
-        #         interp_inner = np.concatenate((interp_inner, np.array([x_inner, y_inner]).T))
-        #         interp_outer = np.concatenate((interp_outer, np.array([x_outer, y_outer]).T))
-        for i, e in enumerate(inner_array):
-            x_inner = np.linspace(e[0,0], e[-1,0], len(e))
-            y_inner = np.interp(x_inner, e[:,0], e[:,1])
-            if i == 0:
-                interp_inner = np.array([x_inner, y_inner]).T
-            else:
-                interp_inner = np.concatenate((interp_inner, np.array([x_inner, y_inner]).T))
-        for i, e in enumerate(outer_array):
-            x_outer = np.linspace(e[0,0], e[-1,0], len(e))
-            y_outer = np.interp(x_outer, e[:,0], e[:,1])
-            if i == 0:
-                interp_outer = np.array([x_outer, y_outer]).T
-            else:
-                interp_outer = np.concatenate((interp_outer, np.array([x_outer, y_outer]).T))
+    def convex_cam_pts(self, points, plot=False):
+        hull = ConvexHull(points, incremental=True)
+        points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
-        """ plt.scatter(interp_inner[:,0], interp_inner[:,1])
-        plt.scatter(interp_outer[:,0], interp_outer[:,1])
-        plt.title('Interpolated convex cam points')
-        plt.legend(['Inner cam', 'Outer cam'])
-        plt.axis('equal')
-        plt.show() """
-
-        # convert convex cam points into polar coordinates
-        new_radii = self.calc_radii_convex_cams(interp_inner, interp_outer) # returns tuple of 2 ndarrays
-        new_angles = self.get_convex_hull_angles(interp_inner, interp_outer) # returns a tuple of 2 ndarrays
-
-        """ fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.scatter(new_angles[0], new_radii[0]) # inner cam
-        ax.scatter(new_angles[1], new_radii[1]) # outer cam
-        ax.set_rticks([2, 4, 6, 8, 10])
-        ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
-        ax.grid(True)
-        ax.set_title('radii and angles before interpolation') """
-
-        # interpolate between points in polar coordinates
-        inner_cam_fcn = interpolate.interp1d(new_angles[0], new_radii[0], kind='linear',fill_value="extrapolate")
-        outer_cam_fcn = interpolate.interp1d(new_angles[1], new_radii[1], kind='linear',fill_value="extrapolate")
-        
-        # redefine cam radii from interpolated polar points
-        self.cam_radii = np.vstack((inner_cam_fcn(self.angles), outer_cam_fcn(self.angles))).T # get radii of convex cams at regularly-spaced angles
-        r = self.cam_radii[:, 0]
-        R = self.cam_radii[:, 1]
-
-        """ fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(self.angles - np.pi, r)
-        ax.plot(self.angles - (3*np.pi/2), R )  # apply phase change to the outer cam
-        ax.set_rticks([2, 4, 6, 8, 10])
-        ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
-        ax.grid(True)
-        ax.set_title('interpolated cam') """
-
-        # define cam points in Cartesian space after inerpolating in polar coordinates
-        # note that phase changes are applied to counteract that in 
-        self.inner_pts = np.array([r * np.cos(self.angles - np.pi), r * np.sin(self.angles - np.pi)]).T
-        self.outer_pts = np.array([R * np.cos(self.angles - 3* np.pi / 2), R * np.sin(self.angles - 3 * np.pi / 2)]).T # apply phase change to the outer cam
-
-        # check that Cartesian points match polar points
-        """ plt.figure()
-        plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
-        plt.plot(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
-        plt.legend(['inner cam','outer cam'])
-        plt.axis('equal')
-        plt.show() """
-
-        # get max radius to use for cam envelope
-        max_radius = np.max(self.cam_radii)
-    
-        return max_radius
-
-    def interpolate(self, kind='cubic'):
-        '''
-        Interpolate the radii with spline curve, kind = "quadratic or cubic"
-        interpolation kind pls refer to https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.interp1d.html#scipy.interpolate.interp1d
-        '''
-        # DEBUG
-        # print("input angles: ", self.input_angles)
-        # print("inner radii: ", self.cam_radii[:, 0])
-        # print("outer radii: ", self.cam_radii[:, 1])
-
-        inner_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 0], kind=kind, fill_value="extrapolate")
-        outer_cam_fcn = interpolate.interp1d(self.input_angles, self.cam_radii[:, 1], kind=kind, fill_value="extrapolate")
-
-        self.cam_radii = np.vstack((inner_cam_fcn(self.angles), outer_cam_fcn(self.angles))).T
-
-    def cam_pts(self, stroke=np.pi, convex=True):
-        r = self.cam_radii[:, 0]
-        R = self.cam_radii[:, 1]
-        x_c = np.cumsum(r * 2 * np.pi / self.ninterp) # cumulative arc length at each interpolation point along inner cam
-
-        # scale cam size to desired stroke length (amount of cable displacement from sitting down)
-        ratio = stroke / x_c[self.sit_ind]
-        r = r * ratio
-        R = R * ratio
-        self.inner_pts = np.array([r * np.cos(self.angles), r * np.sin(self.angles)]).T
-        self.outer_pts = np.array([R * np.cos(self.angles - np.pi / 2), R * np.sin(self.angles - np.pi / 2)]).T # apply phase change to the outer cam
-        if convex:
-            self.convex_cam_pts()
-            self.plot_cams()
-        return self.inner_pts, self.outer_pts
-
-    def convex_cam_pts(self):
-        inner_hull = ConvexHull(self.inner_pts,incremental=True)
-        # print('IN CONVEX FUNC',inner_hull.points[inner_hull.vertices])
-        """ plt.scatter(inner_hull.points[inner_hull.vertices][:,0],inner_hull.points[inner_hull.vertices][:,1])
-        plt.title('Inner hull points (in convex_cam_pts function)')
-        plt.show() """
-        outer_hull = ConvexHull(self.outer_pts,incremental=True)
-        self.inner_pts = np.vstack((self.inner_pts[inner_hull.vertices, 0], self.inner_pts[inner_hull.vertices, 1])).T
-        self.outer_pts = np.vstack((self.outer_pts[outer_hull.vertices, 0], self.outer_pts[outer_hull.vertices, 1])).T
-
-        """ plt.plot(self.inner_pts[:,0], self.inner_pts[:,1], lw = 2)
-        plt.plot(self.outer_pts[:,0], self.outer_pts[:,1], lw = 2)
+        if plot:
+            plt.figure()
+            plt.scatter(hull.points[hull.vertices][:,0],hull.points[hull.vertices][:,1])
+            plt.title('hull points (in convex_cam_pts function)')
+            plt.show()
+        """ plt.plot(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
+        plt.plot(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
         plt.legend(['inner cam','outer cam'])
         plt.axis('equal')
         plt.title('Inner & outer points (in convex_cam_pts function)')
         plt.show() """
+
+        # Split cam points into 2 or 3 sub-arrays that each monotonically
+        # increase or decrease in x. Flip any segments that are monotonically
+        # decreasing, which is required by numpy.interp(), and interpolate.
+        break_ind = []
+        for ind in range(len(points) - 2):
+            if (math.copysign(1, np.diff(points[ind : ind+2, 0]))
+                != math.copysign(1, np.diff(points[ind+1 : ind+3, 0]))):
+                    break_ind.append(ind+2)
+        points_array = []
+        points_array.append(points[: break_ind[0], :])
+        if len(break_ind) == 2:
+            points_array.append(points[break_ind[0] : break_ind[1], :])
+            points_array.append(points[break_ind[1] :, :])
+        elif len(break_ind) == 1:
+            points_array.append(points[break_ind[0] :, :])
+        for ind, sub_array in enumerate(points_array):
+            if not np.all(np.diff(sub_array[:, 0]) > 0):
+                points_array[ind] = np.flip(points_array[ind], 0)
+        for ind, sub_array in enumerate(points_array):
+            # x = np.linspace(sub_array[0, 0], sub_array[-1, 0], len(sub_array))
+            x = np.linspace(sub_array[0, 0], sub_array[-1, 0], 100)
+            y = np.interp(x, sub_array[:, 0], sub_array[:, 1])
+            if ind == 0:
+                interp_array = np.array([x, y]).T
+            else:
+                interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+
+        if plot:
+            plt.scatter(interp_array[:,0], interp_array[:,1])
+            plt.title('Interpolated convex cam points')
+            plt.axis('equal')
+            plt.show()
+
+        # Convert interpolated convex cam points into polar coordinates.
+        # Linearly interpolate between points in polar coordinates and return.
+        polar_radii = np.empty(interp_array.shape[0])
+        for ind, point in enumerate(interp_array):
+            dist = np.linalg.norm(point)
+            polar_radii[ind] = dist
+        polar_angles = np.arctan2(interp_array[:, 1], interp_array[:, 0]) + np.pi
+        polar_angles = np.array([polar_angles]).flatten() ## SS: check if needed
+
+        if plot:
+            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+            ax.scatter(polar_angles, polar_radii)
+            ax.set_rticks([2, 4, 6, 8, 10])
+            ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
+            ax.grid(True)
+            ax.set_title('radii and angles before interpolation')
+
+        polar_cam_fcn = interpolate.interp1d(polar_angles,
+                                             polar_radii,
+                                             kind='linear',
+                                             fill_value='extrapolate')
         
+        if np.any(np.isnan(polar_cam_fcn(self.angles))):
+            print("Warning: NaN in cam radii")
 
-    def alter_cam_profiles(self, routing=None):
-        '''
-        routing: 2*2 np.array, The first row defines the anchor position (in angle) and cable thickness of the inner cam,
-                               while the second row defines those of the outer cam.
-        [[anchor angle of inner cam, thickness of pulling cable, screw_diameter],
-        [anchor angle of outer cam, thickness of elastic band,  screw_diameter]]
-        '''
-        if routing is not None:
-            inner_anchor = routing[0, 0]
-            outer_anchor = routing[1, 0]
-            t_inner = routing[0, 1]
-            t_outer = routing[1, 1]
-            outer_screw = routing[0, 2]
-            inner_screw = routing[1, 2]
-            inner_profile = t_inner * np.zeros(np.sum(self.angles>inner_anchor), 1)
-            self.cam_radii[self.angles > inner_anchor, 0] = self.cam_radii[self.angles>inner_anchor, 0] - inner_profile
+        return polar_cam_fcn(self.angles)
 
-    def plot_cams(self,cam_radii = 0 ,stroke=np.pi):
-        '''
+    def calc_forces_percentages(self, angle_data, torque=False, stroke=2*np.pi,
+                               plot=False, index=0):
+        """Calculate the force profiles vs stance percentage given the solved
+        cam radii.
+        stroke: scalar, full stroke of the pulling cable
+        """
+        # Calculate elastic band tension from displacement and experimental 
+        # characterization assuming linear stiffness. Calculate cable tension
+        # from elastic band tension and gear ratios.
+        x_elastic = 2 * np.cumsum(self.cam_radii[:, 1] * 2*np.pi / self.n_interp)
+        E_elastic = 14
+        k_elastic = 2 * E_elastic / x_elastic[self.sit_ind]**2
+        f_elastic = k_elastic * x_elastic
+        f_cable =  f_elastic * self.cam_radii[:, 1] / self.cam_radii[:, 0]
+        # print(f"Elastic band stiffness {k} N/m; Pulling distance {x_e[self.sit_ind]} m")
+
+        # Account for nonlinear change in knee angle during standing.
+        # Percentages go from ~0% to ~100% going from sitting to standing.
+        knee_array = np.loadtxt(angle_data, delimiter = ',', ndmin = 2)
+        percentages = knee_array[:, 0]
+        knee_angles = knee_array[:, 1]
+        knee_fcn = interpolate.interp1d(percentages, knee_angles,
+                                        kind='cubic', fill_value='extrapolate')
+        percentages = np.linspace(0, 100, self.sit_ind + 1)
+        knee_angles = knee_fcn(percentages)
+
+        # Find linear relationship between stand percentage and cable
+        # displacement. Flip arrays to go from standing to sitting. Scale cable
+        # displacement to knee angle percentage.
+        knee_angles = np.flip(knee_angles)
+        percentages = np.flip(percentages)
+        x_cable_knee = (self.x_cable[self.sit_ind]
+                        * (1 - (knee_angles-np.min(knee_angles))
+                           / np.ptp(knee_angles))) 
+
+        if plot:
+            plt.figure()
+            plt.plot(knee_angles, x_cable_knee)
+            plt.xlabel('knee angle (degree)')
+            plt.ylabel('cable displacement, xc (m)')
+            plt.title('knee angle and cable displacement linear relationship')
+
+            # plot stance percentage vs. cable displacement
+            plt.figure()
+            plt.plot(percentages, x_cable_knee)
+            plt.xlabel('Stance Percentage (%)')
+            plt.ylabel('Cable Displacement (m)')
+
+        # Add "negative" stance phase to account for forces that occur when cam 
+        # is rotated past the sitting position. For this phase, assume a linear
+        # relationship between cable displacement and stance percentage.
+        perc_remaining = (self.sit_ind - self.n_interp) / self.n_interp * 100
+        ind_perc_rem = (np.where(np.round(percentages)
+                                 == np.round(-perc_remaining))[0][0])
+        perc_neg = np.linspace(-1/self.sit_ind * 100,
+                               perc_remaining,
+                               self.n_interp - self.sit_ind)
+        x_c_knee_neg = np.linspace(x_cable_knee[-1],
+                                 2 * x_cable_knee[-1] - x_cable_knee[ind_perc_rem],
+                                 self.n_interp - self.sit_ind)
+        percentages = np.concatenate((percentages, perc_neg))
+        x_cable_knee = np.concatenate((x_cable_knee, x_c_knee_neg))
+
+        if np.any(np.isnan(self.x_cable)):
+            print("Warning: NaN in cam radii")
+        
+        # Remove duplicate points to avoid errors in interpolation.
+        repeat_dict = defaultdict(list)
+        for ind, point in enumerate(self.x_cable):
+            repeat_dict[point].append(ind)
+        repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
+        repeat_ind = np.array(list(repeat_dict.values()))
+        if len(repeat_dict) > 0:
+            print("Repeated values and indices: ", repeat_dict)
+            self.x_cable = np.delete(self.x_cable, repeat_ind)
+            self.angles = np.delete(self.angles, repeat_ind)
+            x_elastic = np.delete(x_elastic, repeat_ind)
+
+        # Relate elastic force to stance percentage into account.
+        cable_fcn = interpolate.interp1d(self.x_cable, self.angles,
+                                         kind='cubic', fill_value='extrapolate')
+        elastic_fcn = interpolate.interp1d(self.angles, x_elastic,
+                                           kind='cubic', fill_value='extrapolate')
+        angle_scaled = cable_fcn(x_cable_knee)
+        x_elastic_scaled = elastic_fcn(angle_scaled)
+        f_cable_scaled = (self.cam_radii[:, 1] / self.cam_radii[:, 0]
+                          * k_elastic * x_elastic_scaled)
+        
+        # Plot and save values.
+        if plot:
+            plt.figure()
+            plt.plot(percentages, angle_scaled)
+            plt.xlabel('Stance Percentage (%)')
+            plt.ylabel('Cam Angle (rad)')
+
+            # plot elastic band displacement vs. stance percentage
+            plt.figure()
+            plt.plot(percentages, x_elastic_scaled)
+            plt.xlabel('Stance Percentage (%)')
+            plt.ylabel('Elastic displacement (m)')
+            
+            # plot cable force vs. stance percentage
+            plt.figure()
+            plt.plot(percentages, f_cable_scaled,
+                     label='Cable Force', linewidth=3)
+            plt.legend(loc='upper right')
+            plt.xlabel('Stance Percentage (%)')
+            plt.ylabel('Force (N)')
+            plt.xlim([-60, 100])
+            plt.ylim([0, 250])
+            filename = 'force_plot_' + str(index) + '.png'
+            plt.savefig(filename, dpi=300)
+            
+            np.savetxt('force_output.csv',
+                       np.stack((self.angles, self.x_cable, f_elastic, f_cable),
+                                axis=1),
+                                header='angles(rad), pulling distance(m), \
+                                elastic band force(n), cable force(n)')
+            if torque:
+                plt.figure()
+                plt.scatter(self.angles * 360 / (2*np.pi),
+                            f_elastic * self.cam_radii[:, 0])
+                plt.xlabel('Angle (deg)')
+                plt.ylabel('Torque (N-m)')
+            plt.show()
+
+        return f_cable_scaled[:-10], percentages[:-10] ## SS: why [:-10]?
+
+    def plot_cams(self, cam_radii=0, stroke=np.pi, index=0):
+        """
         Plots the cam points as a sanity check feature.
         stroke: scalar, full stroke of the pulling cable
-        '''
+        """
         # print("cam_radii: ", cam_radii)
         # if cam_radii.all() == 0:
         #     cam_radii = self.cam_radii
         r = self.cam_radii[:, 0]
         R = self.cam_radii[:, 1]
-        x_c = np.cumsum(r * 2 * np.pi / self.ninterp) 
-        ratio = stroke / x_c[self.sit_ind] # full stroke divided by distance along cam perimeter of sitting angle
+        # x_c = np.cumsum(r * 2 * np.pi / self.n_interp) 
+        # ratio = stroke / x_c[self.sit_ind] # full stroke divided by distance along cam perimeter of sitting angle
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(self.angles - np.pi / 2, R * ratio)  # apply phase change to the outer cam
-        ax.plot(self.angles, r*ratio)
+        # ax.plot(self.angles - np.pi / 2, R * ratio)  # apply phase change to the outer cam
+        # ax.plot(self.angles, r*ratio)
+        ax.plot(self.angles, r)
+        ax.plot(self.angles, R)
         ax.set_rticks([2, 4, 6, 8, 10])
         ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
         ax.grid(True)
-
-        ax.set_title(f"Cam Demonstration, min inner radius={r.min()*ratio}, max outer radius={R.max()*ratio}", va='bottom')
-
-        # print("sit index: ", self.sit_ind)
-        # print("x_c[sit_ind]: ", x_c[self.sit_ind])
-        # print("ratio: ", ratio)
-
-
-    def plot_forces(self, torque=False, stroke=2*np.pi):
-        '''
-        Plot the force profiles vs angular displacement
-        given the gear ratios and solved cam radii.
-        stroke: scalar, full stroke of the pulling cable
-        '''
-        
-        # arrays of radii for inner cam (r) and outer cam (R)
-        r = self.cam_radii[:, 0]
-        R = self.cam_radii[:, 1]
-
-        # scale cable displacement and radii to match stroke length
-        x_c = np.cumsum(r * 2 * np.pi / self.ninterp) # cable displacement distance
-        ratio = stroke / x_c[self.sit_ind] # ratio of stroke length to unscaled displacement at sitting index
-        x_c = x_c * ratio
-        r = r * ratio
-        R = R * ratio
-
-        # calculate elastic band forces
-        x_e = np.cumsum(R * 2 * np.pi / self.ninterp)*2     # elastic band displacement
-        k = 2*14/x_e[self.sit_ind]**2
-        # print(f"Elastic band stiffness {k} N/m; Pulling distance {x_e[self.sit_ind]} m")
-        f_e = k * x_e # force exerted by elastic band (assumes linear stiffness)
-
-        # calculate cable forces
-        f_c = R * f_e / r # force on cable is a function of elastic force and gear ratio
-
-        # normalize_angles(self, )
-        
-        plt.figure()
-        plt.plot(self.angles / 2 / np.pi * 360, f_e, label='Elastic Band Force', linewidth=3)
-        plt.plot(self.angles / 2 / np.pi * 360, f_c, label='Cable Force', linewidth=3)
-        # plt.plot(x_c, f_e, label='Elastic Band Force', linewidth=3)
-        # plt.plot(x_c, f_c, label='Cable Force', linewidth=3)
-        #plt.scatter(self.angles / 2 / np.pi * 360, f_e * r, label='torque')
-        plt.legend(loc="lower right")
-        plt.xlabel('Angles (deg)')
-        # plt.xlabel('pulling distance/cam perimeter distance (m)')
-        plt.ylabel('Force (N)')
-        # plt.xlim([0, 0.17])
-        plt.xlim([0, 300])
-        plt.ylim([0, 130])
-        # plt.gca().set_xticks([0, 0.04, 0.08, 0.12, 0.16])
-        plt.title("Force Profiles of the Mechanism")
-
-        np.savetxt('force_output.csv', np.stack((self.angles, x_c, f_e, f_c), axis=1),  header='angles(rad), pulling distance(m), elastic band force(n), cable force(n)')
-        if torque:
-            plt.figure()
-            plt.scatter(self.angles / 2 / np.pi * 360, f_e * r)
-            plt.xlabel('angle (deg)')
-            plt.ylabel('torque (N*m)')
-        plt.show()
-
-    def plot_forces_percentage(self, file, torque=False, stroke = 2 * np.pi,plot = True):
-        '''
-        Plot the force profiles vs stance percentage given the gear ratios and solved cam radii.
-        stroke: scalar, full stroke of the pulling cable
-        '''
-
-        # arrays of radii for inner cam (r) and outer cam (R)
-        r = self.cam_radii[:, 0]
-        R = self.cam_radii[:, 1]
-
-        # scale cable displacement and cam radii to match stroke length
-        x_c = np.cumsum(r * 2 * np.pi / self.ninterp)       # cable displacement array over entire cam rotation
-        ratio = stroke / x_c[self.sit_ind]                  # ratio of stroke length to unscaled displacement at sitting index
-        # print("stroke: ", stroke)
-        # print("raw sitting displacement, x_c[self.sit_ind]: ", x_c[self.sit_ind])
-        # print("ratio: ", ratio)
-        # STS: already scaled by the ratio in calculate_cam_radii
-        x_c = x_c * ratio
-        r = r * ratio
-        R = R * ratio
-
-        # calculate elastic band tension from displacement
-        x_e = np.cumsum(R * 2 * np.pi / self.ninterp) * 2     # elastic band displacement array
-        k = 2 * 14 / x_e[self.sit_ind] ** 2                   # elastic stiffness (calculated from experimental values)
-        # print(f"Elastic band stiffness {k} N/m; Pulling distance {x_e[self.sit_ind]} m")
-        f_e = k * x_e # force exerted by elastic band (assumes linear stiffness)
-
-        # calculate cable forces from elastic band tension
-        f_c = R * f_e / r # tension on cable is a function of elastic tension and gear ratio
-
-        ### account for nonlinear change in knee angle during standing ###
-        # load experimental knee data
-        knee_array = np.loadtxt(file, delimiter = ',', ndmin = 2)
-        percentage_raw = knee_array[:,0];  # percentage of stance (~0% to ~100% going from sitting to standing)
-        knee_angles_raw = knee_array[:,1]; # corresponding knee angle
-
-        # interpolate & extrapolate knee angle array to match size of cam arrays
-        knee_fcn = interpolate.interp1d(percentage_raw, knee_angles_raw, kind = 'cubic', fill_value = 'extrapolate')
-        percentage = np.linspace(0, 100, self.sit_ind + 1)
-        knee_angles = knee_fcn(percentage)
-
-        # find linear relationship between stand percentage and cable displacement
-        knee_angles_flip = np.flip(knee_angles) # flip knee array to go from standing to sitting
-        percentage_flip = np.flip(percentage) # flip percentage stance to correspond to knee angle (standing to sitting)
-        xc_knee = x_c[self.sit_ind] * (1 - (knee_angles_flip - np.min(knee_angles_flip)) / np.ptp(knee_angles_flip) ) # scale cable displacement to knee angle (goes from standing to sitting)
-        
-        # plot knee angle vs. cable displacement
-        if plot:
-            """ plt.figure()
-            plt.plot(knee_angles_flip, xc_knee)
-            plt.xlabel('knee angle (degree)')
-            plt.ylabel('cable displacement, xc (m)')
-            plt.title('knee angle and cable displacement linear relationship') """
-
-            """ # plot stance percentage vs. cable displacement
-            plt.figure()
-            plt.plot(percentage_flip, xc_knee)
-            plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Cable Displacement (m)') """
-
-        # add "negative" stance phase to account for part of cam past sitting index
-        perc_neg = np.linspace((self.sit_ind - self.ninterp) * (100 / self.sit_ind), -100 / self.sit_ind, self.ninterp - self.sit_ind)
-        xc_knee_neg = np.linspace(xc_knee[-1], xc_knee[-1] + (self.ninterp - self.sit_ind) * ((xc_knee[-1] - xc_knee[ np.int_(3*self.sit_ind/4) ] ) / (self.sit_ind/4)), self.ninterp - self.sit_ind)
-
-        percentage = np.concatenate((perc_neg, percentage))
-        percentage_flip = np.flip(percentage)
-        xc_knee = np.concatenate((xc_knee, xc_knee_neg))
-        
-        # create functions relating cable and elastic displacement to cam angle
-        cable_fcn = interpolate.interp1d(x_c, self.angles, kind='cubic', fill_value='extrapolate') # cable displacement in, angle out
-        elastic_fcn = interpolate.interp1d(self.angles, x_e, kind='cubic', fill_value='extrapolate') # angle in, elastic displacement out
-
-        # calculate cam angle from cable displacement that follows stance percentage
-        angle_percentage = cable_fcn(xc_knee)
-
-        # calculate elastic displacement from angle
-        elastic_percentage = elastic_fcn(angle_percentage)
-
-        # calculate cable force using stance percentage as independent variable
-        f_c_new = R / r * k * elastic_percentage
-        
-        ### plot and save values ###
-        # plot cam angle vs. stance percentage
-        if plot:
-            """ plt.figure()
-            plt.plot(percentage_flip, angle_percentage)
-            plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Cam Angle (rad)') """
-
-            """ # plot elastic band displacement vs. stance percentage
-            plt.figure()
-            plt.plot(percentage_flip, elastic_percentage)
-            plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Elastic displacement (m)') """
-            
-            # plot cable force vs. stance percentage
-            plt.figure()
-            plt.plot(np.flip(percentage), f_c_new, label='Cable Force', linewidth=3)
-            plt.legend(loc="upper right")
-            plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Force (N)')
-            plt.xlim([-60, 100])
-            plt.ylim([0, 250])
-            
-            np.savetxt('force_output.csv', np.stack((self.angles, x_c, f_e, f_c), axis=1),  header='angles(rad), pulling distance(m), elastic band force(n), cable force(n)')
-            if torque:
-                plt.figure()
-                plt.scatter(self.angles / 2 / np.pi * 360, f_e * r)
-                plt.xlabel('angle (deg)')
-                plt.ylabel('torque (N*m)')
-            plt.show()
-
-        return f_c_new[:-10],np.flip(percentage)[:-10] # sitting force is the force at 0%
-
-
+        ax.set_title(f"Cam Demonstration, min radius={np.min(self.cam_radii)}, max radius={np.max(self.cam_radii)}", va='bottom')
+        filename = 'cam_plot_' + str(index) + '.png'
+        plt.savefig(filename, dpi=300)
