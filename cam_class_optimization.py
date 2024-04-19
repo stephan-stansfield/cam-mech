@@ -20,14 +20,20 @@ class CamGeneration:
     """
     
     def __init__(self, gear_ratios, input_angles, scaling, sit_angle=np.pi):
-        """points: number of points to define on cams
-        gear_ratios: (points*2)-dim ndarray [gear_ratios; angles]
+        """
+        Parameters:
+        gear_ratios: desired gear ratio at each angle along the compound cam
+        input_angles: angles at which to define the desired gear ratios
         scaling: scalar multiple, e.g. 0.5, to determine overall size of cams
+        sit_angle: angle in radians along the compound cam at which force cable
+        is acting while the user is seated
         """
         # Sort gear ratios and input angles in ascending order of input angles.
-        sorted_inds = np.argsort(input_angles)
-        self.input_angles = input_angles[sorted_inds]
-        self.input_angles = input_angles * sit_angle / np.pi # SS: don't understand this scaling still...the implicit assumption is that the input angle is pi?
+        self.input_angles = input_angles
+        self.gear_ratios = gear_ratios
+        sorted_inds = np.argsort(self.input_angles)
+        self.input_angles = self.input_angles[sorted_inds]
+        # self.input_angles = self.input_angles * sit_angle / np.pi # SS: don't understand this scaling still...the implicit assumption is that the input angle is pi?
         self.gear_ratios = gear_ratios[sorted_inds]
 
         # Initialize class variables.
@@ -56,16 +62,24 @@ class CamGeneration:
         """
         
         # Calculate initial cam sizes using gear ratios and scaling factor.
-        r_min = 0.5
+        ratio_min = 0.5
         for ind, ratio in enumerate(self.gear_ratios):
             # r = self.scaling * np.sqrt(ratio) * self.cam_radii[ind, 0]
             # R = self.scaling * self.cam_radii[ind, 1] / np.sqrt(ratio)
             [r, R] = self.scaling * np.array([np.sqrt(ratio), 1/np.sqrt(ratio)])
-            if r < r_min:
-                r = r_min
-                R = r_min / ratio
+            if r < ratio_min:
+                r = ratio_min
+                R = ratio_min / ratio
             self.cam_radii[ind, :] = np.array([r, R])
             # self.cam_radii[ind, 1] = R
+
+        if plot:
+            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+            ax.plot(self.input_angles, self.cam_radii[:, 0])
+            ax.plot(self.input_angles, self.cam_radii[:, 1] )
+            ax.grid(True)
+            ax.set_title('original, scaled cam points')
+            plt.show()
 
         # Pad arrays to ensure continuity and then interpolate between points.
         self.cam_radii = np.append(self.cam_radii, self.cam_radii[: 2, :],
@@ -75,17 +89,25 @@ class CamGeneration:
         self.cam_radii = np.insert(self.cam_radii, 0, self.cam_radii[-4 : -2, :],
                                    axis = 0)
         self.input_angles = np.insert(self.input_angles, 0,
-                                       self.input_angles[-4 : -2] - 2*np.pi)
+                                      self.input_angles[-4 : -2] - 2*np.pi)
         cam_fcn_inner = interpolate.interp1d(self.input_angles,
                                              self.cam_radii[:, 0],
-                                             kind='cubic',
+                                             kind='linear',
                                              fill_value='extrapolate')
         cam_fcn_outer = interpolate.interp1d(self.input_angles,
                                              self.cam_radii[:, 1],
-                                             kind='cubic',
+                                             kind='linear',
                                              fill_value='extrapolate')
         self.cam_radii = np.vstack((cam_fcn_inner(self.angles),
                                     cam_fcn_outer(self.angles))).T
+        
+        if plot:
+            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+            ax.plot(self.angles, self.cam_radii[:, 0])
+            ax.plot(self.angles, self.cam_radii[:, 1])
+            ax.grid(True)
+            ax.set_title('cams after initial cubic interpolation')
+            plt.show()
         
         if np.any(np.isnan(self.cam_radii)):
             print("Warning: NaN in cam radii")
@@ -102,6 +124,7 @@ class CamGeneration:
                                                   np.sin(self.angles - np.pi/2)
                                                   ]).T
         if plot:
+            plt.figure()
             plt.scatter(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
             plt.scatter(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
             plt.legend(['inner cam','outer cam'])
@@ -141,13 +164,23 @@ class CamGeneration:
             plt.plot(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
             plt.plot(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
             plt.legend(['inner cam','outer cam'])
+            plt.title('Convex cams plotted with Cartesian points')
             plt.axis('equal')
             plt.show()
 
         # Scale cam size to desired stroke length
-        self.x_cable = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
-        ratio = stroke / self.x_cable[self.sit_ind]
-        self.cam_radii *= ratio
+        ratio = 0
+        threshold = 0.01
+        r_min = 0.25*25.4
+        while abs(ratio - 1) > threshold:
+            self.x_cable = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
+            ratio = stroke / self.x_cable[self.sit_ind]
+            self.cam_radii *= ratio
+            self.x_cable *= ratio
+            for cam in self.cam_radii:
+                for point in cam:
+                    if point < r_min:
+                        point = r_min
         radius_max = np.max(self.cam_radii)
         if plot:
             self.plot_cams(self.cam_radii, stroke, index)
@@ -237,13 +270,12 @@ class CamGeneration:
         """
         # Calculate elastic band tension from displacement and experimental 
         # characterization assuming linear stiffness. Calculate cable tension
-        # from elastic band tension and gear ratios.
+        # from elastic band tension and gear ratios. Values are in N, m, & N/m.
         x_elastic = 2 * np.cumsum(self.cam_radii[:, 1] * 2*np.pi / self.n_interp)
-        E_elastic = 14
-        k_elastic = 2 * E_elastic / x_elastic[self.sit_ind]**2
+        k_elastic = 110
         f_elastic = k_elastic * x_elastic
         f_cable =  f_elastic * self.cam_radii[:, 1] / self.cam_radii[:, 0]
-        # print(f"Elastic band stiffness {k} N/m; Pulling distance {x_e[self.sit_ind]} m")
+        # print(f"Elastic band stiffness {k_elastic} N/m; Pulling distance {x_elastic[self.sit_ind]} m")
 
         # Account for nonlinear change in knee angle during standing.
         # Percentages go from ~0% to ~100% going from sitting to standing.
@@ -300,7 +332,8 @@ class CamGeneration:
         for ind, point in enumerate(self.x_cable):
             repeat_dict[point].append(ind)
         repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
-        repeat_ind = np.array(list(repeat_dict.values()))
+        repeat_list = list(repeat_dict.values())
+        repeat_ind = np.array(sum(repeat_list, []))
         if len(repeat_dict) > 0:
             print("Repeated values and indices: ", repeat_dict)
             self.x_cable = np.delete(self.x_cable, repeat_ind)
@@ -374,9 +407,11 @@ class CamGeneration:
         # ax.plot(self.angles, r*ratio)
         ax.plot(self.angles, r)
         ax.plot(self.angles, R)
-        ax.set_rticks([2, 4, 6, 8, 10])
+        # ax.set_rticks([2, 4, 6, 8, 10])
         ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
         ax.grid(True)
         ax.set_title(f"Cam Demonstration, min radius={np.min(self.cam_radii)}, max radius={np.max(self.cam_radii)}", va='bottom')
+        plt.show()
+
         filename = 'cam_plot_' + str(index) + '.png'
         plt.savefig(filename, dpi=300)
