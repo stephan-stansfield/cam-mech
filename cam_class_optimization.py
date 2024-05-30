@@ -8,6 +8,8 @@ from scipy import interpolate
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from collections import defaultdict
+from datetime import date
+from os import path, makedirs
 
 font = {'size': 14}
 matplotlib.rc('font', **font)
@@ -19,7 +21,7 @@ class CamGeneration:
     Can give energy output given stiffness as well.
     """
     
-    def __init__(self, gear_ratios, input_angles, scaling, sit_angle=np.pi):
+    def __init__(self, gear_ratios, input_angles, scaling, sit_angle, offset_angle):
         """
         Parameters:
         gear_ratios: desired gear ratio at each angle along the compound cam
@@ -27,13 +29,14 @@ class CamGeneration:
         scaling: scalar multiple, e.g. 0.5, to determine overall size of cams
         sit_angle: angle in radians along the compound cam at which force cable
         is acting while the user is seated
+        offset_angle: angle in radians along the compound cam at which the 
+        energy storage band acts relative to the force cable
         """
         # Sort gear ratios and input angles in ascending order of input angles.
         self.input_angles = input_angles
         self.gear_ratios = gear_ratios
         sorted_inds = np.argsort(self.input_angles)
         self.input_angles = self.input_angles[sorted_inds]
-        # self.input_angles = self.input_angles * sit_angle / np.pi # SS: don't understand this scaling still...the implicit assumption is that the input angle is pi?
         self.gear_ratios = gear_ratios[sorted_inds]
 
         # Initialize class variables.
@@ -41,11 +44,10 @@ class CamGeneration:
         self.cam_radii = np.ones((self.gear_ratios.shape[0], 2))
         self.n_interp = 360 
         self.sit_ind = round(sit_angle * self.n_interp / (2*np.pi))
+        self.offset_ind = round(offset_angle * self.n_interp / (2*np.pi))
         self.angles = np.arange(0, self.n_interp+1, 1) * 2*np.pi / self.n_interp 
         self.pts_inner = None
         self.pts_outer = None
-        # self.cam_radii = np.ones((self.points, 2)) @ np.diag([1, 1/scaling])  # initial guess for inner and outer cam radii
-        # self.input_angles = self.gear_ratios[:, 1] # take the second row of gear ratios to be the input angles
 
     def calculate_cam_radii(self, stroke=np.pi, plot=False, index=0):
         """Calculates the cam radii for each gear ratio and input angle.
@@ -78,12 +80,14 @@ class CamGeneration:
             self.cam_radii[ind, :] = np.array([r, R])
 
         if plot:
+            """
             fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.scatter(self.input_angles, self.cam_radii[:, 0])
             ax.scatter(self.input_angles, self.cam_radii[:, 1] )
             ax.grid(True)
             ax.set_title('original, scaled cam points')
             plt.show()
+            """
 
         # Convert cam points to Cartesian space.
         # SS: do we need the phase change here?
@@ -112,13 +116,14 @@ class CamGeneration:
         self.cam_radii = np.vstack((cam_radii_inner, cam_radii_outer)).T
 
         if plot:
+            """
             fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.scatter(self.angles, self.cam_radii[:, 0])
             ax.scatter(self.angles, self.cam_radii[:, 1] )
             ax.grid(True)
             ax.set_title('Polar interpolated convex cam points')
             plt.show()
-
+            """
 
         # Scale cam size to desired stroke length. Iteratively check that the
         # minimum radius is not violated.
@@ -141,6 +146,13 @@ class CamGeneration:
         if plot:
             self.plot_cams(self.cam_radii, stroke, index)
 
+        # Rotate values in outer cam to account for where elastic band leaves
+        # surface relative to where cable leaves surface.
+        outer_1 = self.cam_radii[:self.offset_ind, 1]
+        outer_2 = self.cam_radii[self.offset_ind:, 1]
+        outer_rotated = np.concatenate((outer_2, outer_1))
+        self.cam_radii[:, 1] = outer_rotated
+
         # Convert cam points to Cartesian space.
         self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
                                                  np.sin(self.angles)
@@ -148,16 +160,10 @@ class CamGeneration:
         self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.angles),
                                                   np.sin(self.angles)
                                                   ]).T
-
-        # Check that Cartesian points match polar points.
+        
         if plot:
-            plt.figure()
-            plt.plot(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
-            plt.plot(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
-            plt.legend(['inner cam','outer cam'])
-            plt.title('Convex cams plotted with Cartesian points')
-            plt.axis('equal')
-            plt.show()
+            # Check that Cartesian points match polar points.
+            self.plot_cams_cartesian(self.pts_inner, self.pts_outer)
  
         return self.pts_inner, self.pts_outer, radius_max
 
@@ -199,7 +205,6 @@ class CamGeneration:
             dist = np.linalg.norm(point)
             radii_convex[ind] = dist
         angles_convex = np.arctan2(points[:, 1], points[:, 0])
-        print("foo")
         for ind, angle in enumerate(angles_convex):
             if angle < 0:
                 angles_convex[ind] += 2*np.pi
@@ -228,11 +233,13 @@ class CamGeneration:
         points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
         if plot:
+            """
             plt.figure()
-            plt.scatter(points[:,0], points[:,1])
+            plt.scatter(points[:, 0], points[:, 1])
             plt.title('Cam points after second convex hull function')
             plt.axis('equal')
             plt.show()
+            """
 
         # Split Cartesian cam points into 2 or 3 sub-arrays that each
         # monotonically increase or decrease in x.
@@ -242,12 +249,12 @@ class CamGeneration:
                 != math.copysign(1, np.diff(points[ind+1 : ind+3, 0]))):
                     break_ind.append(ind+2)
         points_array = []
-        points_array.append(points[: break_ind[0], :])
+        points_array.append(points[:break_ind[0], :])
         if len(break_ind) == 2:
-            points_array.append(points[break_ind[0] : break_ind[1], :])
-            points_array.append(points[break_ind[1] :, :])
+            points_array.append(points[break_ind[0]:break_ind[1], :])
+            points_array.append(points[break_ind[1]:, :])
         elif len(break_ind) == 1:
-            points_array.append(points[break_ind[0] :, :])
+            points_array.append(points[break_ind[0]:, :])
 
         # Flip any segments that are monotonically decreasing, which is required
         # by numpy.interp(). Then, linearly interpolate between 100 points over
@@ -265,11 +272,13 @@ class CamGeneration:
                 interp_array = np.concatenate((interp_array, np.array([x, y]).T))
 
         if plot:
+            """
             plt.figure()
-            plt.scatter(interp_array[:,0], interp_array[:,1])
+            plt.scatter(interp_array[:, 0], interp_array[:, 1])
             plt.title('Cartesian interpolated convex cam points')
             plt.axis('equal')
             plt.show()
+            """
 
         # Convert interpolated convex cam points into polar coordinates in range
         # [0, 2*pi].
@@ -286,6 +295,11 @@ class CamGeneration:
         # sorted_inds = np.argsort(angles_interp)
         # angles_interp = angles_interp[sorted_inds]
         # radii_interp = radii_interp[sorted_inds]
+
+        # Remove duplicates to avoid errors in interpolation.
+        dup_removed = self.remove_duplicates(angles_interp, radii_interp)
+        angles_interp = dup_removed[0]
+        radii_interp = dup_removed[1]
 
         # Pad arrays to ensure continuity at end points. Linearly interpolate
         # between points in polar coordinates and return.
@@ -341,33 +355,40 @@ class CamGeneration:
                                  / np.ptp(knee_angles))) 
 
         if plot:
+            """
             plt.figure()
             plt.plot(knee_angles, x_cable_scaled)
             plt.xlabel('knee angle (degree)')
             plt.ylabel('cable displacement, xc (m)')
             plt.title('knee angle and cable displacement linear relationship')
+            
 
             # plot stance percentage vs. cable displacement
             plt.figure()
             plt.plot(percentages, x_cable_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cable Displacement (m)')
+            """
 
         if np.any(np.isnan(self.x_cable)):
             print("Warning: NaN in cam radii")
         
         # Remove duplicate points to avoid errors in interpolation.
-        repeat_dict = defaultdict(list)
-        for ind, point in enumerate(self.x_cable):
-            repeat_dict[point].append(ind)
-        repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
-        repeat_list = list(repeat_dict.values())
-        repeat_ind = np.array(sum(repeat_list, []))
-        if len(repeat_dict) > 0:
-            print("Repeated values and indices: ", repeat_dict)
-            self.x_cable = np.delete(self.x_cable, repeat_ind)
-            self.angles = np.delete(self.angles, repeat_ind)
-            x_elastic = np.delete(x_elastic, repeat_ind)
+        dup_removed = self.remove_duplicates(self.x_cable, self.angles, x_elastic)
+        self.x_cable = dup_removed[0]
+        self.angles = dup_removed[1]
+        x_elastic = dup_removed[2]
+        # repeat_dict = defaultdict(list)
+        # for ind, point in enumerate(self.x_cable):
+        #     repeat_dict[point].append(ind)
+        # repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
+        # repeat_list = list(repeat_dict.values())
+        # repeat_ind = np.array(sum(repeat_list, []))
+        # if len(repeat_dict) > 0:
+        #     print("Repeated values and indices: ", repeat_dict)
+        #     self.x_cable = np.delete(self.x_cable, repeat_ind)
+        #     self.angles = np.delete(self.angles, repeat_ind)
+        #     x_elastic = np.delete(x_elastic, repeat_ind)
 
         # Find force in elastic band from stance percentage as input. Use cable
         # displacement scaled to knee angle to find cam angle. Then use cam
@@ -379,12 +400,14 @@ class CamGeneration:
                                            kind='cubic', fill_value='extrapolate')
         angle_scaled = cable_fcn(x_cable_scaled)
         x_elastic_scaled = elastic_fcn(angle_scaled)
-        f_cable_scaled = (self.cam_radii[:self.sit_ind+1, 1] /
-                          self.cam_radii[:self.sit_ind+1, 0]
+        f_cable_scaled = (self.cam_radii[: self.sit_ind+1, 1] /
+                          self.cam_radii[: self.sit_ind+1, 0]
                           * k_elastic * x_elastic_scaled)
         
         # Plot and save values.
         if plot:
+            """
+            # plot cam angle vs. stance percentage
             plt.figure()
             plt.plot(percentages, angle_scaled)
             plt.xlabel('Stance Percentage (%)')
@@ -395,6 +418,7 @@ class CamGeneration:
             plt.plot(percentages, x_elastic_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Elastic displacement (m)')
+            """
             
             # plot cable force vs. stance percentage
             plt.figure()
@@ -405,14 +429,13 @@ class CamGeneration:
             plt.ylabel('Force (N)')
             plt.xlim([0, 100])
             plt.ylim([0, 250])
-            filename = 'force_plot_' + str(index) + '.png'
+            today = date.today()
+            dateStr = today.strftime("%Y-%m-%d")
+            newpath = 'results/cam_plots/cam_plots_' + dateStr
+            if not path.exists(newpath):
+                makedirs(newpath)
+            filename = newpath + '/force_plot_' + str(index) + '.png'
             plt.savefig(filename, dpi=300)
-            
-            np.savetxt('force_output.csv',
-                       np.stack((self.angles, self.x_cable, f_elastic, f_cable),
-                                axis=1),
-                                header='angles(rad), pulling distance(m), \
-                                elastic band force(n), cable force(n)')
             if torque:
                 plt.figure()
                 plt.scatter(self.angles * 360 / (2*np.pi),
@@ -421,7 +444,45 @@ class CamGeneration:
                 plt.ylabel('Torque (N-m)')
             plt.show()
 
+            np.savetxt('force_output.csv',
+                       np.stack((self.angles, self.x_cable, f_elastic, f_cable),
+                                axis=1),
+                                header='angles(rad), pulling distance(m), \
+                                    elastic band force(n), cable force(n)')
+
         return f_cable_scaled, percentages
+    
+    def remove_duplicates(self, x, y=None, z=None):
+        """
+        Remove duplicate values from the given array `x` and corresponding values from `y`.
+
+        Args:
+            x (ndarray): Array of values.
+            y (ndarray or None): Array of corresponding values or None.
+
+        Returns:
+            ndarray: Updated array `x` with duplicate values removed.
+            ndarray or None: Updated array `y` with corresponding values removed, or None if `y` is None.
+
+        """
+        # Store indices of repeated values in a dictionary.
+        repeat_dict = defaultdict(list)
+        for ind, point in enumerate(x):
+            repeat_dict[point].append(ind)
+        repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
+        repeat_list = list(repeat_dict.values())
+        repeat_ind = np.array(sum(repeat_list, []))
+        
+        # If there are repeated values, print and remove them from the arrays.
+        if len(repeat_dict) > 0:
+            # print("Repeated values and indices: ", repeat_dict)
+            x = np.delete(x, repeat_ind)
+            if y is not None:
+                y = np.delete(y, repeat_ind)
+            if z is not None:
+                z = np.delete(z, repeat_ind)
+        
+        return x, y, z
 
     def plot_cams(self, cam_radii=0, stroke=np.pi, index=0):
         """
@@ -435,6 +496,7 @@ class CamGeneration:
         R = self.cam_radii[:, 1]
         # x_c = np.cumsum(r * 2 * np.pi / self.n_interp) 
         # ratio = stroke / x_c[self.sit_ind] # full stroke divided by distance along cam perimeter of sitting angle
+        plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         # ax.plot(self.angles - np.pi / 2, R * ratio)  # apply phase change to the outer cam
         # ax.plot(self.angles, r*ratio)
@@ -444,7 +506,24 @@ class CamGeneration:
         ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
         ax.grid(True)
         ax.set_title(f"Cam Demonstration, min radius={np.min(self.cam_radii)}, max radius={np.max(self.cam_radii)}", va='bottom')
+
+        today = date.today()
+        dateStr = today.strftime("%Y-%m-%d")
+        newpath = 'results/cam_plots/cam_plots_' + dateStr
+        if not path.exists(newpath):
+            makedirs(newpath)
+        filename = newpath + '/cam_plot_' + str(index) + '.png'
+        plt.savefig(filename, dpi=300)
         plt.show()
 
-        filename = 'cam_plot_' + str(index) + '.png'
-        plt.savefig(filename, dpi=300)
+    def plot_cams_cartesian(self, pts_inner, pts_outer):
+        """
+        Plots the cam points in Cartesian space
+        """
+        plt.figure()
+        plt.plot(pts_inner[:, 0], pts_inner[:, 1], lw = 2)
+        plt.plot(pts_outer[:, 0], pts_outer[:, 1], lw = 2)
+        plt.axis('equal')
+        plt.legend(['inner cam','outer cam'])
+        plt.title('Cam Points in Cartesian Space')
+        plt.show()
