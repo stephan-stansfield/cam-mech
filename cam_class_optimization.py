@@ -1,5 +1,7 @@
 """Using python 3.10"""
 import math
+from datetime import date
+from os import path, makedirs
 
 import numpy as np
 import matplotlib
@@ -8,8 +10,6 @@ from scipy import interpolate
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from collections import defaultdict
-from datetime import date
-from os import path, makedirs
 
 font = {'size': 14}
 matplotlib.rc('font', **font)
@@ -48,6 +48,7 @@ class CamGeneration:
         self.angles = np.arange(0, self.n_interp+1, 1) * 2*np.pi / self.n_interp 
         self.pts_inner = None
         self.pts_outer = None
+        self.dateStr = date.today().strftime("%Y-%m-%d")
 
     def calculate_cam_radii(self, stroke=np.pi, plot=False, index=0):
         """Calculates the cam radii for each gear ratio and input angle.
@@ -63,7 +64,7 @@ class CamGeneration:
         radius_max: scalar maximum radius of the cam envelopes
         """
         
-        # Calculate initial cam sizes using gear ratios and scaling factor.
+        # Calculate initial cam keypoints using gear ratios and scaling factor.
         # Check if any of the radii are smaller than the minimum allowed radius
         # and adjust as needed.
         radius_min = 0.5
@@ -80,14 +81,13 @@ class CamGeneration:
             self.cam_radii[ind, :] = np.array([r, R])
 
         if plot:
-            """
             fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.scatter(self.input_angles, self.cam_radii[:, 0])
             ax.scatter(self.input_angles, self.cam_radii[:, 1] )
             ax.grid(True)
             ax.set_title('original, scaled cam points')
             plt.show()
-            """
+            
 
         # Convert cam points to Cartesian space.
         # SS: do we need the phase change here?
@@ -100,14 +100,14 @@ class CamGeneration:
         self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.input_angles), # SS: this had a -np.pi/2 here before (4/30/24)
                                                   np.sin(self.input_angles)
                                                   ]).T
-        # if plot:
-        #     plt.figure()
-        #     plt.scatter(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
-        #     plt.scatter(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
-        #     plt.legend(['inner cam','outer cam'])
-        #     plt.axis('equal')
-        #     plt.title('before convex function plot')
-        #     plt.show()
+        """ if plot:
+            plt.figure()
+            plt.scatter(self.pts_inner[:,0], self.pts_inner[:,1], lw = 2)
+            plt.scatter(self.pts_outer[:,0], self.pts_outer[:,1], lw = 2)
+            plt.legend(['inner cam','outer cam'])
+            plt.axis('equal')
+            plt.title('before convex function plot')
+            plt.show() """
         
         # Calculate points of convex hull for each cam. Results are cam radii
         # (polar coordinates).
@@ -116,14 +116,12 @@ class CamGeneration:
         self.cam_radii = np.vstack((cam_radii_inner, cam_radii_outer)).T
 
         if plot:
-            """
-            fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+            """ fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.scatter(self.angles, self.cam_radii[:, 0])
             ax.scatter(self.angles, self.cam_radii[:, 1] )
             ax.grid(True)
             ax.set_title('Polar interpolated convex cam points')
-            plt.show()
-            """
+            plt.show() """
 
         # Scale cam size to desired stroke length. Iteratively check that the
         # minimum radius is not violated.
@@ -143,8 +141,8 @@ class CamGeneration:
                     if point < r_min:
                         point = r_min
         radius_max = np.max(self.cam_radii)
-        if plot:
-            self.plot_cams(self.cam_radii, stroke, index)
+        """ if plot:
+            self.plot_cams(self.cam_radii, stroke, index) """
 
         # Rotate values in outer cam to account for where elastic band leaves
         # surface relative to where cable leaves surface.
@@ -161,10 +159,9 @@ class CamGeneration:
                                                   np.sin(self.angles)
                                                   ]).T
         
+        # Plot and return the final cam shapes.
         if plot:
-            # Check that Cartesian points match polar points.
             self.plot_cams_cartesian(self.pts_inner, self.pts_outer)
- 
         return self.pts_inner, self.pts_outer, radius_max
 
     def convex_cam_pts(self, points, plot=False):
@@ -233,13 +230,11 @@ class CamGeneration:
         points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
         if plot:
-            """
-            plt.figure()
+            """ plt.figure()
             plt.scatter(points[:, 0], points[:, 1])
             plt.title('Cam points after second convex hull function')
             plt.axis('equal')
-            plt.show()
-            """
+            plt.show() """
 
         # Split Cartesian cam points into 2 or 3 sub-arrays that each
         # monotonically increase or decrease in x.
@@ -258,27 +253,73 @@ class CamGeneration:
 
         # Flip any segments that are monotonically decreasing, which is required
         # by numpy.interp(). Then, linearly interpolate between 100 points over
-        # the range of each sub-array {and between the sub-arrays?}. This fills
+        # the range of each sub-array and between the sub-arrays?. This fills
         # any gaps that resulted from the convex hull operation.
+        max_gap = 0.1
+        # gap_inds = []
+        interp_array = np.empty((0, 2))
         for ind, sub_array in enumerate(points_array):
+            # Identify any large gaps between sub-arrays and inerpolate over them.
+            if ind != len(points_array) - 1:
+                if math.dist(sub_array[-1], points_array[ind+1][0]) > max_gap:
+                    # gap_inds.append(ind)
+                    x1 = sub_array[-1, 0]
+                    x2 = points_array[ind+1][0, 0]
+                    y1 = sub_array[-1,1]
+                    y2 = points_array[ind+1][0,1]
+                    if x1 > x2:
+                        x = np.linspace(x2, x1, 100)
+                        y = np.interp(x, [x2, x1], [y2, y1])
+                    else:
+                        x = np.linspace(x1, x2, 100)
+                        y = np.interp(x, [x1, x2], [y1, y2])
+                    interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+            else:
+                if math.dist(sub_array[-1], points_array[0][0]) > max_gap:
+                    # gap_inds.append(ind)
+                    x1 = sub_array[-1, 0]
+                    x2 = points_array[0][0, 0]
+                    y1 = sub_array[-1,1]
+                    y2 = points_array[0][0,1]
+                    if x1 > x2:
+                        x = np.linspace(x2, x1, 100)
+                        y = np.interp(x, [x2, x1], [y2, y1])
+                    else:
+                        x = np.linspace(x1, x2, 100)
+                        y = np.interp(x, [x1, x2], [y1, y2])
+                    interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+        for ind, sub_array in enumerate(points_array):
+            # Flip segments that are monotonically decreasing.
             if not np.all(np.diff(sub_array[:, 0]) > 0):
                 points_array[ind] = np.flip(points_array[ind], 0)
         for ind, sub_array in enumerate(points_array):
             x = np.linspace(sub_array[0, 0], sub_array[-1, 0], 100)
             y = np.interp(x, sub_array[:, 0], sub_array[:, 1])
-            if ind == 0:
+            """ if ind == 0:
                 interp_array = np.array([x, y]).T
             else:
-                interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+                interp_array = np.concatenate((interp_array, np.array([x, y]).T)) """
+            interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+            # if np.abs(points_array[ind+1][0,0] - sub_array[-1,0]) > max_gap:
+            # if ind != len(points_array) - 1:
+            #     if math.dist(sub_array[-1], points_array[ind+1][0]) > max_gap:
+            #         x = np.linspace(sub_array[-1, 0], points_array[ind+1][0, 0], 100)
+            #         y = np.interp(x, [sub_array[-1, 0], points_array[ind+1][0, 0]],
+            #                     [sub_array[-1, 1], points_array[ind+1][0,1]])
+            #         interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+            # else:
+            #     if math.dist(sub_array[-1], points_array[0][0]) > max_gap:
+            #         x = np.linspace(sub_array[-1, 0], points_array[0][0, 0], 100)
+            #         y = np.interp(x, [sub_array[-1, 0], points_array[0][0, 0]],
+            #                     [sub_array[-1, 1], points_array[0][0,1]])
+            #         interp_array = np.concatenate((interp_array, np.array([x, y]).T))
 
         if plot:
-            """
-            plt.figure()
+            """ plt.figure()
             plt.scatter(interp_array[:, 0], interp_array[:, 1])
             plt.title('Cartesian interpolated convex cam points')
             plt.axis('equal')
-            plt.show()
-            """
+            plt.show() """
 
         # Convert interpolated convex cam points into polar coordinates in range
         # [0, 2*pi].
@@ -429,9 +470,8 @@ class CamGeneration:
             plt.ylabel('Force (N)')
             plt.xlim([0, 100])
             plt.ylim([0, 250])
-            today = date.today()
-            dateStr = today.strftime("%Y-%m-%d")
-            newpath = 'results/cam_plots/cam_plots_' + dateStr
+
+            newpath = 'results/force_plots/force_plots_' + self.dateStr
             if not path.exists(newpath):
                 makedirs(newpath)
             filename = newpath + '/force_plot_' + str(index) + '.png'
@@ -489,27 +529,17 @@ class CamGeneration:
         Plots the cam points as a sanity check feature.
         stroke: scalar, full stroke of the pulling cable
         """
-        # print("cam_radii: ", cam_radii)
-        # if cam_radii.all() == 0:
-        #     cam_radii = self.cam_radii
         r = self.cam_radii[:, 0]
         R = self.cam_radii[:, 1]
-        # x_c = np.cumsum(r * 2 * np.pi / self.n_interp) 
-        # ratio = stroke / x_c[self.sit_ind] # full stroke divided by distance along cam perimeter of sitting angle
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        # ax.plot(self.angles - np.pi / 2, R * ratio)  # apply phase change to the outer cam
-        # ax.plot(self.angles, r*ratio)
         ax.plot(self.angles, r)
         ax.plot(self.angles, R)
-        # ax.set_rticks([2, 4, 6, 8, 10])
-        ax.set_rlabel_position(-22.5)  # move radial labels away from plotted line
+        ax.set_rlabel_position(-22.5)
         ax.grid(True)
         ax.set_title(f"Cam Demonstration, min radius={np.min(self.cam_radii)}, max radius={np.max(self.cam_radii)}", va='bottom')
 
-        today = date.today()
-        dateStr = today.strftime("%Y-%m-%d")
-        newpath = 'results/cam_plots/cam_plots_' + dateStr
+        newpath = 'results/cam_plots/cam_plots_' + self.dateStr
         if not path.exists(newpath):
             makedirs(newpath)
         filename = newpath + '/cam_plot_' + str(index) + '.png'
