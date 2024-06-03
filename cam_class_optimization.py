@@ -50,13 +50,13 @@ class CamGeneration:
         self.pts_outer = None
         self.dateStr = date.today().strftime("%Y-%m-%d")
 
-    def calculate_cam_radii(self, stroke=np.pi, plot=False, index=0):
+    def calculate_cam_radii(self, user_height=1.67, plot=False, index=0):
         """Calculates the cam radii for each gear ratio and input angle.
         Determines the convex hull of the given gear ratios and angles, then
         interpolates between these points to generate the cam radii.
         
         Parameters:
-        stroke: scalar, full stroke of the pulling cable
+        user_height: height, in meters, of the person the device is designed for
 
         Returns:
         pts_inner: ndarray, inner cam points in Cartesian space
@@ -123,11 +123,17 @@ class CamGeneration:
             ax.set_title('Polar interpolated convex cam points')
             plt.show() """
 
-        # Scale cam size to desired stroke length. Iteratively check that the
+        # Determine stroke length achieved by flexing knee from upright to 90
+        # degrees. This calculation is based on measurements taken in Song et
+        # al., 2022(https://doi.org/10.1177/15589250221138546), linearly scaled
+        # to the user's height.
+        unstretch_len = 0.10
+        stretch_pct = 1.016
+        user_height_ref = 1.67
+        stroke = user_height / user_height_ref * unstretch_len * stretch_pct
+
+        # Scale cam size to calculated stroke length. Iteratively check that the
         # minimum radius is not violated.
-        # Note that while pts_inner and pts_outer are returned, that is just to 
-        # check for NaN. In the subsequent functions that are called, only
-        # cam_radii are used.
         ratio = 0
         threshold = 0.01
         r_min = 0.25*25.4
@@ -142,7 +148,7 @@ class CamGeneration:
                         point = r_min
         radius_max = np.max(self.cam_radii)
         """ if plot:
-            self.plot_cams(self.cam_radii, stroke, index) """
+            self.plot_cams(self.cam_radii, index) """
 
         # Rotate values in outer cam to account for where elastic band leaves
         # surface relative to where cable leaves surface.
@@ -358,13 +364,12 @@ class CamGeneration:
 
         return polar_cam_fcn(self.angles)
 
-    def calc_forces_percentages(self, angle_data, torque=False, stroke=np.pi,
-                               plot=False, index=0):
+    def calc_forces_percentages(self, angle_data, torque=False, plot=False,
+                                index=0):
         """Calculate the force profiles vs stance percentage given the solved
         cam radii. The order of causality is:
         stance percentage -> knee angle -> cable displacement -> cam angle -> 
         elastic band displacement -> elastic band force -> cable force
-        stroke: scalar, full stroke of the pulling cable
         """
         # Calculate elastic band tension from displacement and experimental 
         # characterization assuming linear stiffness. Calculate cable tension
@@ -524,10 +529,9 @@ class CamGeneration:
         
         return x, y, z
 
-    def plot_cams(self, cam_radii=0, stroke=np.pi, index=0):
+    def plot_cams(self, cam_radii=0, index=0):
         """
-        Plots the cam points as a sanity check feature.
-        stroke: scalar, full stroke of the pulling cable
+        Plots the cam points in polar coordinates.
         """
         r = self.cam_radii[:, 0]
         R = self.cam_radii[:, 1]
@@ -548,7 +552,7 @@ class CamGeneration:
 
     def plot_cams_cartesian(self, pts_inner, pts_outer):
         """
-        Plots the cam points in Cartesian space
+        Plots the cam points in Cartesian coordinates.
         """
         plt.figure()
         plt.plot(pts_inner[:, 0], pts_inner[:, 1], lw = 2)
