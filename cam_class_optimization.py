@@ -147,8 +147,6 @@ class CamGeneration:
                     if point < r_min:
                         point = r_min
         radius_max = np.max(self.cam_radii)
-        """ if plot:
-            self.plot_cams(self.cam_radii, index) """
 
         # Rotate values in outer cam to account for where elastic band leaves
         # surface relative to where cable leaves surface.
@@ -157,17 +155,19 @@ class CamGeneration:
         outer_rotated = np.concatenate((outer_2, outer_1))
         self.cam_radii[:, 1] = outer_rotated
 
-        # Convert cam points to Cartesian space.
+        if plot:
+            self.plot_cams(self.cam_radii, index)
+
+        # Convert cam points to Cartesian space and return the final cam shapes.
         self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
                                                  np.sin(self.angles)
                                                  ]).T
         self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.angles),
                                                   np.sin(self.angles)
                                                   ]).T
-        
-        # Plot and return the final cam shapes.
-        if plot:
-            self.plot_cams_cartesian(self.pts_inner, self.pts_outer)
+    
+        """ if plot:
+            self.plot_cams_cartesian(self.pts_inner, self.pts_outer) """
         return self.pts_inner, self.pts_outer, radius_max
 
     def convex_cam_pts(self, points, plot=False):
