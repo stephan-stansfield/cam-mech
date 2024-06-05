@@ -16,9 +16,8 @@ matplotlib.rc('font', **font)
 
 
 class CamGeneration:
-    """Class that generates points on the cams for
-    every degree given torque/gear ratios. 
-    Can give energy output given stiffness as well.
+    """Class that generates points on the cams for every degree given
+    torque/gear ratios. Can also return force and energy output given stiffness.
     """
     
     def __init__(self, gear_ratios, input_angles, scaling, sit_angle, offset_angle):
