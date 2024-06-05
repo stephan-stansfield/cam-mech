@@ -57,6 +57,7 @@ class CamGeneration:
         
         Parameters:
         user_height: height, in meters, of the person the device is designed for
+        user_height: height, in meters, of the person the device is designed for
 
         Returns:
         pts_inner: ndarray, inner cam points in Cartesian space
@@ -532,6 +533,7 @@ class CamGeneration:
     def plot_cams(self, cam_radii=0, index=0):
         """
         Plots the cam points in polar coordinates.
+        Plots the cam points in polar coordinates.
         """
         r = self.cam_radii[:, 0]
         R = self.cam_radii[:, 1]
@@ -552,6 +554,7 @@ class CamGeneration:
 
     def plot_cams_cartesian(self, pts_inner, pts_outer):
         """
+        Plots the cam points in Cartesian coordinates.
         Plots the cam points in Cartesian coordinates.
         """
         plt.figure()
