@@ -454,7 +454,7 @@ class CamGeneration:
                 plt.ylabel('Torque (N-m)')
             plt.show()
 
-            np.savetxt(filepath + 'force_output.csv',
+            np.savetxt(filepath + '/_force_output.csv',
                        np.stack((self.angles, self.x_cable, f_elastic, f_cable),
                                 axis=1),
                                 header='angles(rad), pulling distance(m), \
