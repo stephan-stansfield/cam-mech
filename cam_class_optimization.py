@@ -6,9 +6,14 @@ from os import path, makedirs
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import pandas as pd
 from scipy import interpolate
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
+from scipy.optimize import minimize
+from scipy.optimize import LinearConstraint
+from scipy.optimize import NonlinearConstraint
+from scipy.optimize import Bounds
 from collections import defaultdict
 
 font = {'size': 14}
@@ -201,14 +206,15 @@ class CamGeneration:
         points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
         # Convert convex cam points to polar coordinates in range [0, 2*pi].
-        radii_convex = np.empty(points.shape[0])
-        for ind, point in enumerate(points):
-            dist = np.linalg.norm(point)
-            radii_convex[ind] = dist
-        angles_convex = np.arctan2(points[:, 1], points[:, 0])
-        for ind, angle in enumerate(angles_convex):
-            if angle < 0:
-                angles_convex[ind] += 2*np.pi
+        # radii_convex = np.empty(points.shape[0])
+        # for ind, point in enumerate(points):
+        #     dist = np.linalg.norm(point)
+        #     radii_convex[ind] = dist
+        # angles_convex = np.arctan2(points[:, 1], points[:, 0])
+        # for ind, angle in enumerate(angles_convex):
+        #     if angle < 0:
+        #         angles_convex[ind] += 2*np.pi
+        radii_convex, angles_convex = self.to_polar(points)
 
         # Sort points in ascending order of angles.
         sorted_inds = np.argsort(angles_convex)
@@ -307,14 +313,15 @@ class CamGeneration:
 
         # Convert interpolated convex cam points into polar coordinates in range
         # [0, 2*pi].
-        radii_interp = np.empty(interp_array.shape[0])
-        for ind, point in enumerate(interp_array):
-            dist = np.linalg.norm(point)
-            radii_interp[ind] = dist
-        angles_interp = np.arctan2(interp_array[:, 1], interp_array[:, 0])
-        for ind, angle in enumerate(angles_interp):
-            if angle < 0:
-                angles_interp[ind] += 2*np.pi
+        # radii_interp = np.empty(interp_array.shape[0])
+        # for ind, point in enumerate(interp_array):
+        #     dist = np.linalg.norm(point)
+        #     radii_interp[ind] = dist
+        # angles_interp = np.arctan2(interp_array[:, 1], interp_array[:, 0])
+        # for ind, angle in enumerate(angles_interp):
+        #     if angle < 0:
+        #         angles_interp[ind] += 2*np.pi
+        radii_interp, angles_interp = self.to_polar(interp_array)
 
         # Remove duplicates to avoid errors in interpolation.
         dup_removed = self.remove_duplicates(angles_interp, radii_interp)
@@ -337,7 +344,7 @@ class CamGeneration:
 
         return polar_cam_fcn(self.angles)
 
-    def calc_forces_percentages(self, angle_data, k_elastic, torque=False,
+    def calc_forces(self, angle_data, k_elastic, torque=False,
                                 plot=False, index=0):
         """Calculate the force profiles vs stance percentage given the solved
         cam radii. The order of causality is:
@@ -348,7 +355,7 @@ class CamGeneration:
         # and using experimental stiffness characterization, simplified to be
         # linear. Note that storage cam angle is offset. Calculate cable tension
         # from elastic band tension and gear ratios. Values are in N, m, & N/m.
-        x_elastic = 2 * np.cumsum(self.cam_offset * 2*np.pi / self.n_interp)
+        x_elastic = np.cumsum(self.cam_offset * 2*np.pi / self.n_interp)
         f_elastic = k_elastic * x_elastic
         f_cable =  f_elastic * self.cam_offset / self.cam_radii[:, 0]
         # print(f"Elastic band stiffness {k_elastic} N/m; Pulling distance {x_elastic[self.sit_ind]} m")
@@ -459,8 +466,89 @@ class CamGeneration:
                                 axis=1),
                                 header='angles(rad), pulling distance(m), \
                                     elastic band force(n), cable force(n)')
-
+            
         return f_cable_scaled, percentages
+    
+    def generate_sit_cam(self, folder_path, cam_idx):
+        count = 1
+
+        # Load point cam clouds in Cartesian coordinates.
+        points_stand = np.array(pd.read_csv(f'{folder_path}inner_{cam_idx}.txt',
+                                         header=None, usecols=[0,1])) / 1000
+        points_store = np.array(pd.read_csv(f'{folder_path}outer_{cam_idx}.txt',
+                                         header = None, usecols=[0,1])) / 1000
+
+        # Convert point clouds to polar coordinates.
+        radii_stand, angles_stand = self.to_polar(points_stand)
+        # radii_store, angles_store = self.to_polar(points_store)
+
+        # Constrain the radii at sit and stand angles to be equal to that of the
+        # sit-to-stand cam, within a threshold. Set lower bounds of all other
+        # radii to be a straight line between the start and end radii.
+        thresh_end = 0.001
+        lb = np.linspace(radii_stand[0], radii_stand[self.sit_ind], num=self.sit_ind+1)
+        lb[0] = radii_stand[0] - thresh_end
+        lb[-1] = radii_stand[self.sit_ind] - thresh_end
+        ub = np.ones(self.sit_ind+1) * np.inf
+        ub[0] = radii_stand[0] + thresh_end
+        ub[-1] = radii_stand[self.sit_ind] + thresh_end
+        bounds = Bounds(lb, ub)
+
+        # Constrain the path lengths to be equal within a threshold.
+        x_cable_stand = np.cumsum(radii_stand * 2*np.pi / self.n_interp)
+        path_length_stand = x_cable_stand[self.sit_ind]
+        thresh_path = 0.01
+        def cons_path(x):
+            x_cable_sit = np.cumsum(x * 2*np.pi / self.n_interp)
+            path_length_sit = x_cable_sit[-1]
+            return path_length_sit - path_length_stand
+        path_constraint = NonlinearConstraint(cons_path, -thresh_path, thresh_path)
+
+        # Define the objective function for optimization: minimize change in
+        # radii.
+        def objective(x):
+            return np.sum(np.abs(np.diff(x)))
+
+        # Set the initial guess for optimization: a straight line between the
+        # sit-to-stand cam radii end points.
+        x0 = np.linspace(radii_stand[0], radii_stand[self.sit_ind],
+                         num=self.sit_ind+1)
+        plt.figure()
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        ax.plot(self.angles[:self.sit_ind+1], x0, label='Initial guess')
+        plt.show()
+
+        # Check the optimization progress intermittently.
+        def callback_fun(self, x):
+            global count
+            if count % 10 == 0:
+                print(f"Optimization iteration {Nfeval}: {objective(x)}")
+                plt.figure()
+                fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+                ax.plot(self.angles[:self.sit_ind+1], x, label=f"Optimization iteration {Nfeval}")
+                plt.show()
+            Nfeval += 1
+
+        # Perform the optimization
+        result = minimize(objective, x0, options={'verbose': 2},
+                          constraints=path_constraint,
+                          bounds=bounds, callback=callback_fun)
+        
+        # Report and plot the results.
+        print("Stand cam path length: ", path_length_stand)
+        opt_path = np.cumsum(result.x * 2*np.pi / self.n_interp)
+        print("Sit cam path length: ", opt_path[-1])
+        print("Stand cam start radius: ", radii_stand[0])
+        print("Sit cam start radius: ", result.x[0])
+        print("Stand cam end radius: ", radii_stand[self.sit_ind])
+        print("Sit cam end radius: ", result.x[-1])
+
+        plt.figure()
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        ax.plot(self.angles[:self.sit_ind+1], result.x, label='Sitting cam')
+        plt.show()
+
+        print("check it out")
     
     def remove_duplicates(self, x, y=None, z=None):
         """
@@ -495,6 +583,29 @@ class CamGeneration:
                 z = np.delete(z, repeat_ind)
         
         return x, y, z
+    
+    def to_polar(self, points):
+        """
+        Convert the given Cartesian points to polar coordinates.
+
+        Args:
+            points (ndarray): Array of Cartesian points.
+
+        Returns:
+            ndarray: Array of radii.
+            ndarray: Array of angles.
+        """
+        # Calculate radii and angles of the points.
+        radii = np.linalg.norm(points, axis=1)
+        # radii = np.empty(points.shape[0])
+        # for ind, point in enumerate(points):
+            # dist = np.linalg.norm(point)
+            # radii[ind] = dist
+        angles = np.arctan2(points[:, 1], points[:, 0])
+        for ind, angle in enumerate(angles):
+            if angle < 0:
+                angles[ind] += 2*np.pi
+        return radii, angles
 
     def plot_cams(self, cam_radii=0, k_elastic=0, index=0):
         """
