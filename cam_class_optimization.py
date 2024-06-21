@@ -470,74 +470,79 @@ class CamGeneration:
             
         return f_cable_scaled, percentages
     
-    def generate_sit_cam(self, folder_path, cam_idx):
-        # Load point cam clouds in Cartesian coordinates.
+    def generate_sit_cam(self, folder_path, cam_idx, n_params=6):
+        # Load sit-to-stand cam point cloud in Cartesian coordinates.
         points_stand = np.array(pd.read_csv(f'{folder_path}inner_{cam_idx}.txt',
                                          header=None, usecols=[0,1])) / 1000
 
-        # Convert point clouds to polar coordinates.
+        # Convert point cloud to polar coordinates.
         radii_stand, angles_stand = self.to_polar(points_stand)
 
-        # Bounds: constrain the radii at sit and stand angles to be equal to
-        # that of the sit-to-stand cam, within a threshold.
-        # Set lower bounds of all other radii to be a straight line between the
-        # start and end radii.
-        # Set upper bounds of all other radii to 10 cm.
+        def interp_cam(x):
+            # Interpolate between radii keypoints
+            key_angles = x[:n_params]
+            key_radii = x[:n_params]
+            spline_fcn = interpolate.interp1d(key_angles, key_radii,
+                                              kind='cubic', fill_value='extrapolate')
+            radii_interp = spline_fcn(angles_stand[:self.sit_ind+1])
+            return radii_interp
+        
+        # Bounds:
+        # Constrain the radii at sit and stand angles to be equal to those of
+        # the sit-to-stand cam, within a threshold. Set lower and upper bounds
+        # at all other angles to reasonable values.
         thresh_end = 0.001
-        # lb = np.linspace(radii_stand[0], radii_stand[self.sit_ind], num=self.sit_ind+1)
-        lb = np.ones(self.sit_ind+1) * 0.00635
-        lb[0] = radii_stand[0] - thresh_end
-        lb[-1] = radii_stand[self.sit_ind] - thresh_end
-        ub = np.ones(self.sit_ind+1) * 0.10
-        ub[0] = radii_stand[0] + thresh_end
-        ub[-1] = radii_stand[self.sit_ind] + thresh_end
-        # bound_tuples = ()
-        # for ind in range(len(lb)):
-        #     bound_tuples[ind] = (lb[ind], ub[ind])
-        # bound_tuples = tuple(zip(lb, ub))
-        # bounds = Bounds(bound_tuples)
-        bounds = Bounds(lb, ub, keep_feasible=True)
+        lb_ang = np.zeros(n_params)
+        lb_rad = np.ones(n_params) * 0.00635
+        lb_rad[0] = radii_stand[0] - thresh_end
+        lb_rad[-1] = radii_stand[self.sit_ind] - thresh_end
+        lb = np.concatenate((lb_ang, lb_rad))
 
-        # Nonlinear contraint: constrain the path lengths to be equal within a
-        # threshold.
+        ub_ang = np.ones(n_params) * self.angles[self.sit_ind]
+        ub_rad = np.ones(n_params) * 0.10
+        ub_rad[0] = radii_stand[0] + thresh_end
+        ub_rad[-1] = radii_stand[self.sit_ind] + thresh_end
+        ub = np.concatenate((ub_ang, ub_rad))
+        bounds = Bounds(lb, ub, keep_feasible=False)
+
+        # Nonlinear contraint:
+        # Constrain the path lengths to be equal within a threshold.
         x_cable_stand = np.cumsum(radii_stand * 2*np.pi / self.n_interp)
         path_length_stand = x_cable_stand[self.sit_ind]
         thresh_path = 0.01
         ub_path = path_length_stand + thresh_path
         lb_path = path_length_stand - thresh_path
         def cons_path(x):
-            x_cable_sit = np.cumsum(x * 2*np.pi / self.n_interp)
+            radii_interp = interp_cam(x)
+            x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
             path_length_sit = x_cable_sit[-1]
             return path_length_sit
         path_constraint = NonlinearConstraint(cons_path, lb_path, ub_path,
-                                              keep_feasible=True)
+                                              keep_feasible=False)
 
-        # Objective: minimize sum of radii first derivative.
+        # Objective:
+        # Minimize sum of radii first derivative.
         def objective(x):
-            # global n_eval
-            # print (f"Objective evaluation {n_eval}")
-            if any(np.isnan(x)):
-                print("NaN in x!")
-            res = np.sum(np.abs(np.diff(x))) / 1000
-            if np.isnan(res):
-                print("NaN in objective!")
-            return res
+            radii_interp = interp_cam(x)
+            return np.sum(np.abs(np.diff(radii_interp))) / 1000
 
-        # Set the initial guess for optimization: 
+        # Initial guess: 
         # x0 = np.linspace(radii_stand[0], radii_stand[self.sit_ind],
         #                  num=self.sit_ind+1) # a straight line between the sit-to-stand cam radii end points.
         rmax = (path_length_stand * (self.n_interp/(np.pi * self.sit_ind)) 
                 - 0.5 * (radii_stand[0] + radii_stand[self.sit_ind]))
-        x1 = np.linspace(radii_stand[0], rmax, num=int(self.sit_ind/2))
-        x2 = np.linspace(rmax, radii_stand[self.sit_ind], num=int(self.sit_ind/2)+1)
-        x0 = np.concatenate((x1, x2))
-        path_length_init = np.cumsum(x0 * 2*np.pi / self.n_interp)[-1]
+        rad1 = np.linspace(radii_stand[0], rmax, num=int(n_params/2))
+        rad2 = np.linspace(rmax, radii_stand[self.sit_ind], num=int(n_params/2))
+        rad0 = np.concatenate((rad1, rad2))
+        ang0 = np.linspace(angles_stand[0], angles_stand[self.sit_ind], num=n_params)
+        x0 = np.concatenate((ang0, rad0))
+        path_length_init = np.cumsum(rad0 * 2*np.pi / n_params)[-1]
         print(f"INTIAL GUESS PATH LENGTH: {path_length_init}")
         print(f"INITIAL GUESS OBJECTIVE VALUE: {objective(x0)}")
 
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(self.angles[:self.sit_ind+1], x0, label='Initial guess')
+        ax.plot(ang0, rad0, label='Initial guess')
         plt.show()
 
         # Callback: check the optimization progress intermittently.
@@ -546,12 +551,13 @@ class CamGeneration:
         def callback_fun(x):
             global n_eval
             if n_eval % 10 == 0:
-                print(f"Optimization iteration {n_eval}. Objectve = {objective(x)}")
+                print(f"Optimization iteration {n_eval}. Objective = {objective(x)}")
                 print(f"Standing path length: {path_length_stand}")
-                print(f"Current path length: {np.cumsum(x * 2*np.pi / self.n_interp)[-1]}")
+                radii_interp = interp_cam(x)
+                print(f"Current path length: {np.cumsum(radii_interp * 2*np.pi / self.n_interp)[-1]}")
                 plt.figure()
                 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-                ax.plot(self.angles[:self.sit_ind+1], x, label=f"Optimization iteration {n_eval}")
+                ax.plot(angles_stand[:self.sit_ind+1], radii_interp, label=f"Optimization iteration {n_eval}")
                 plt.title(f"Optimization iteration {n_eval}")
                 plt.show()
             n_eval += 1
@@ -564,14 +570,15 @@ class CamGeneration:
                           callback=callback_fun)
         
         # Report and plot the results.
-        opt_path = np.cumsum(result.x * 2*np.pi / self.n_interp)
+        radii_interp = interp_cam(result.x)
+        opt_path = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
         print("Sit cam path length: ", opt_path[-1])
-        print("Sit cam start radius: ", result.x[0])
-        print("Sit cam end radius: ", result.x[-1])
+        print("Sit cam start radius: ", radii_interp[0])
+        print("Sit cam end radius: ", radii_interp[-1])
 
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(self.angles[:self.sit_ind+1], result.x, label='Sitting cam')
+        ax.plot(angles_stand[:self.sit_ind+1], radii_interp, label='Sitting cam')
         plt.show()
 
         print("check it out")
