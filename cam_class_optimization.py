@@ -481,7 +481,7 @@ class CamGeneration:
         def interp_cam(x):
             # Interpolate between radii keypoints
             key_angles = x[:n_params]
-            key_radii = x[:n_params]
+            key_radii = x[n_params:]
             spline_fcn = interpolate.interp1d(key_angles, key_radii,
                                               kind='cubic', fill_value='extrapolate')
             radii_interp = spline_fcn(angles_stand[:self.sit_ind+1])
