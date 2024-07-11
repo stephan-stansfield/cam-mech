@@ -10,12 +10,14 @@ import pandas as pd
 from scipy import interpolate
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
-from scipy.optimize import minimize
+# from scipy.optimize import minimize
 from scipy.optimize import LinearConstraint
 from scipy.optimize import NonlinearConstraint
 from scipy.optimize import Bounds
+from cobyqa import minimize
 from scipy.integrate import trapezoid
 from collections import defaultdict
+
 
 font = {'size': 14}
 matplotlib.rc('font', **font)
@@ -176,13 +178,15 @@ class CamGeneration:
             self.plot_cams_cartesian(self.pts_inner, self.pts_outer) """
         return self.cam_radii, self.pts_inner, self.pts_outer, radius_max, x_cable
 
-    def convex_cam_pts(self, points, plot=False):
+    def convex_cam_pts(self, points, angles, plot=False):
         """
         Compute the convex cam points given a set of input points.
 
         Parameters:
         - points: numpy array
             The input points used to compute the convex cam points.
+        - angles: numpy array
+            The angles used to generate the radii of the convex cam.
         - plot: bool, optional
             If True, plot the intermediate steps of the computation. Default is False.
 
@@ -209,14 +213,6 @@ class CamGeneration:
         points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
         # Convert convex cam points to polar coordinates in range [0, 2*pi].
-        # radii_convex = np.empty(points.shape[0])
-        # for ind, point in enumerate(points):
-        #     dist = np.linalg.norm(point)
-        #     radii_convex[ind] = dist
-        # angles_convex = np.arctan2(points[:, 1], points[:, 0])
-        # for ind, angle in enumerate(angles_convex):
-        #     if angle < 0:
-        #         angles_convex[ind] += 2*np.pi
         radii_convex, angles_convex = self.to_polar(points)
 
         # Sort points in ascending order of angles.
@@ -235,10 +231,10 @@ class CamGeneration:
                                              radii_convex,
                                              kind='quadratic',
                                              fill_value='extrapolate')
-        radii_interp = polar_cam_fcn(self.angles)
+        radii_interp = polar_cam_fcn(angles)
 
         # Convert to Cartesian coordinates and calculate convex hull again.
-        points = (radii_interp * [np.cos(self.angles), np.sin(self.angles)]).T
+        points = (radii_interp * [np.cos(angles), np.sin(angles)]).T
         hull = ConvexHull(points, incremental=True)
         points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
 
@@ -316,14 +312,6 @@ class CamGeneration:
 
         # Convert interpolated convex cam points into polar coordinates in range
         # [0, 2*pi].
-        # radii_interp = np.empty(interp_array.shape[0])
-        # for ind, point in enumerate(interp_array):
-        #     dist = np.linalg.norm(point)
-        #     radii_interp[ind] = dist
-        # angles_interp = np.arctan2(interp_array[:, 1], interp_array[:, 0])
-        # for ind, angle in enumerate(angles_interp):
-        #     if angle < 0:
-        #         angles_interp[ind] += 2*np.pi
         radii_interp, angles_interp = self.to_polar(interp_array)
 
         # Remove duplicates to avoid errors in interpolation.
@@ -342,10 +330,10 @@ class CamGeneration:
                                              kind='cubic',
                                              fill_value='extrapolate')
         
-        if np.any(np.isnan(polar_cam_fcn(self.angles))):
+        if np.any(np.isnan(polar_cam_fcn(angles))):
             print("Warning: NaN in cam radii")
 
-        return polar_cam_fcn(self.angles)
+        return polar_cam_fcn(angles)
     
     def rotate_cam(self, radii):
         # Rotate values in outer cam to account for where elastic band leaves
@@ -442,9 +430,6 @@ class CamGeneration:
         angles = dup_removed[1]
         x_elastic = dup_removed[2]
 
-        if x_cable.size != self.angles.size:
-            print("Warning: Cable path and angle arrays are not the same size")
-
         # Use cable displacement scaled to knee angle to find cam angle.
         # Then use cam angle to find elastic band displacement and force.
         # Finally, find cable force based on the elastic tension and gear ratio
@@ -510,13 +495,25 @@ class CamGeneration:
                          n_params=6):
 
         def interp_cam(x):
-            # Interpolate between radii keypoints
+            # # Interpolate between radii keypoints
+            # key_angles = x[:n_params]
+            # key_radii = x[n_params:]
+            # spline_fcn = interpolate.interp1d(key_angles, key_radii,
+            #                                   kind='cubic', fill_value='extrapolate')
+            # radii_interp = spline_fcn(angles_stand[: self.sit_ind+1])
+            # return radii_interp
+            # Convert radii to points in Cartesian space.
+
+            # Take radii keypoints and angles and return the convex hull of the cam radii.
             key_angles = x[:n_params]
             key_radii = x[n_params:]
-            spline_fcn = interpolate.interp1d(key_angles, key_radii,
-                                              kind='cubic', fill_value='extrapolate')
-            radii_interp = spline_fcn(angles_stand[: self.sit_ind+1])
-            return radii_interp
+            points = (key_radii * [np.cos(key_angles),
+                                      np.sin(key_angles)
+                                      ]).T
+            # Take convex hull of cam radii.
+            radii_convex = self.convex_cam_pts(points, angles_stand[: self.sit_ind+1], False)
+        
+            return radii_convex
         
         # Bounds:
         # Constrain the radii at sit and stand angles to be equal to those of
@@ -536,26 +533,49 @@ class CamGeneration:
         ub = np.concatenate((ub_ang, ub_rad))
         bounds = Bounds(lb, ub, keep_feasible=False)
 
-        # Nonlinear contraint:
-        # Constrain the path lengths to be equal within a threshold.
+        # Nonlinear contraints:
+        # 1. Constrain the path lengths of the stand-to-sit and sit-to-stand
+        # cams to be equal within a threshold.
         x_cable_stand = np.cumsum(radii_stand * 2*np.pi / self.n_interp)
         path_length_stand = x_cable_stand[self.sit_ind]
-        thresh_path = 0.01
+        thresh_path = 0.001
         ub_path = path_length_stand + thresh_path
         lb_path = path_length_stand - thresh_path
-        def cons_path(x):
+        def constr_path(x):
             radii_interp = interp_cam(x)
             x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
             path_length_sit = x_cable_sit[-1]
             return path_length_sit
-        path_constraint = NonlinearConstraint(cons_path, lb_path, ub_path,
+        path_constraint = NonlinearConstraint(constr_path, lb_path, ub_path,
                                               keep_feasible=False)
+        
+        # 2. Constrain the radii at the end points to be equal to the
+        # sit-to-stand cam radii.
+        thresh_end = 0.0001
+        ub_end = thresh_end * np.ones(2)
+        lb_end = -1 * ub_end
+        def constr_ends(x):
+            radii_interp = interp_cam(x)
+            return np.array([radii_interp[0] - radii_stand[0],
+                    radii_interp[-1] - radii_stand[self.sit_ind]])
+        end_constraint = NonlinearConstraint(constr_ends, lb_end, ub_end,
+                                             keep_feasible=False)
+        
+        cons = [path_constraint, end_constraint]
 
         # Objective:
         # Minimize maximum force generated by stand-to-sit cam in combination
         # with outer cam.
         def objective(x):
             radii_interp = interp_cam(x)
+
+            # # Convert radii to points in Cartesian space.
+            # angles = angles_stand[: self.sit_ind+1]
+            # points = (radii_interp * [np.cos(angles),
+            #                           np.sin(angles)
+            #                           ]).T
+            # # Take convex hull of cam radii.
+            # radii_convex = self.convex_cam_pts(points, angles, False)
 
             # Prepare cam radii and cable path for force calculation.
             cam_radii_sit = np.vstack((radii_interp, radii_outer[:self.sit_ind+1])).T
@@ -604,10 +624,10 @@ class CamGeneration:
             n_eval += 1
 
         # Minimize: perform the optimization.
-        result = minimize(objective, x0, method='COBYLA', 
+        result = minimize(objective, x0,
                           options={'maxiter': 10000},
-                          constraints=path_constraint,
-                          bounds=bounds)
+                          constraints=cons)
+                        #   bounds=bounds)
                         #   callback=callback_fun)
         
         # Add the "non-functional" cam radii from the sit-to-stand cam (from the
@@ -617,6 +637,8 @@ class CamGeneration:
         radii_interp = np.concatenate((radii_interp, radii_stand[self.sit_ind+1 :]))
         x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
         print("Sit cam path length (360 deg): ", x_cable_sit[-1])
+        print("Sit cam path length (220 deg): ", x_cable_sit[self.sit_ind])
+        print("Stand cam path length: ", path_length_stand)
         print("Sit cam start radius: ", radii_interp[0])
         print("Sit cam end radius: ", radii_interp[-1])
 
