@@ -647,7 +647,10 @@ class CamGeneration:
         ax.plot(angles_stand, radii_interp, label='Sitting cam')
         plt.show()
 
-        return result, radii_interp, x_cable_sit
+        # Convert radii to Cartesian points for saving.
+        result_points = (radii_interp * [np.cos(self.angles), np.sin(self.angles)]).T
+
+        return result, radii_interp, x_cable_sit, result_points
     
     def remove_duplicates(self, x, y=None, z=None):
         """
@@ -717,10 +720,10 @@ class CamGeneration:
         ax.grid(True)
         ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k_elastic} N/m""")
 
-        filepath = 'results/cam_plots/cam_plots_' + self.dateStr
+        filepath = 'results/cams/cams_' + self.dateStr
         if not path.exists(filepath):
             makedirs(filepath)
-        filename = filepath + '/cam_plot_' + str(index) + '.png'
+        filename = filepath + '/plots/cam_plot_' + str(index) + '.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.show()
 
