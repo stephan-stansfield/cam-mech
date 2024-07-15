@@ -1,0 +1,6 @@
+﻿"axle-diameter"=2
+"switch-thickness"=12
+"base-width"=4.0
+"axle-bushing-radius"=3
+"clearance"= 0.25
+"arm-width"=1.5"min-diameter"=70"alpha"=52.0"beta"=19.3"gamma"=146.8"delta"=58.2"epsilon"=82.2"eta"=-272.1"l_AB"=17.5"l_AC"=5.98"l_BD"=10.8"l_CD"=4.86"l_CE"=14.6"l_DF"=6.93"l_OA"=6.84"D_groove"=3.175"hinge_length"=1.5"hinge_depth"=0.25"EE_dx"=8.74"EE_dy"=8.0"r_groove"="D_groove"/2"t_wall"=25.4/16"width_lower"="D_groove"+"t_wall""cable_to_bottom"=30.6257
