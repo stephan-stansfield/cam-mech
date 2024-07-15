@@ -105,7 +105,7 @@ function stop = opt_visualize(x, optimValues, state)
     hold off;
 
     % Save figure
-    dir = strcat('images/', string(datetime('today', 'Format', 'yyyy-MM-dd')), '/');
+    dir = strcat('solutions/', string(datetime('today', 'Format', 'yyyy-MM-dd')), '/');
     if ~exist(dir, 'dir')
         mkdir(dir);
     end

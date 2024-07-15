@@ -1,6 +1,6 @@
 close all; clear; clc;
 
-tic; % start timing
+tic;
 
 % Set initial guess for lengths and angles
 % All link lengths in mm
@@ -29,20 +29,20 @@ epsilon = deg2rad(-15);
 x0 = [l_OA, l_AB, l_AC, l_BD, l_CD, l_CE, l_DF, alph, gamma, delta, epsilon];
 %%
 % set up and solve nonlinear programming problem
-problem.objective = @(x) opt_objective(x);                      % create anonymous function that returns objective
-problem.nonlcon = @(x) opt_constraints(x);                      % create anonymous function that returns nonlinear constraints
-problem.x0 = x0;                                                % initial guess for decision variables
+problem.objective = @(x) opt_objective(x);
+problem.nonlcon = @(x) opt_constraints(x);
+problem.x0 = x0;
 %            [lOA lAB lAC lBD lCD lCE lDF alpha gamma delta epsilon]
-problem.lb = [ 1   1   1   1   2.5 1   1   0     0     0     -0.5]; % lower bound on decision variables
-problem.ub = [ 30  30  30  30  30  50  30  pi    pi    pi    pi ];  % upper bound on decision variables
-problem.Aineq = []; problem.bineq = [];                         % no linear inequality constraints
-problem.Aeq = []; problem.beq = [];                             % no linear equality constraints
+problem.lb = [ 1   1   1   1   2.5 1   1   0     0     0     -0.5];
+problem.ub = [ 30  30  30  30  30  50  30  pi    pi    pi    pi ];
+problem.Aineq = []; problem.bineq = [];
+problem.Aeq = []; problem.beq = [];
 % f_viz = @(keypoints)opt_visualize(keypoints, save);
 problem.options = optimoptions('fmincon','Display','iter-detailed',...
     'Algorithm','interior-point','EnableFeasibilityMode',true,...
-    'OutputFcn', @opt_visualize, 'OptimalityTolerance', 1.0000e-09); % set options
-problem.solver = 'fmincon';                                     % required
-x = fmincon(problem);                                           % solve nonlinear programming problem
+    'OutputFcn', @opt_visualize, 'OptimalityTolerance', 1.0000e-09);
+problem.solver = 'fmincon';
+x = fmincon(problem);
 
 % Assign optimal values back to variable names
 l_OA = x(1);
@@ -64,7 +64,7 @@ epsilon_deg = rad2deg(epsilon);
 % Get solution keypoints from optimized lengths & angles
 keypoints = opt_calculate(x);
 
-toc; % stop timing
+toc;
 
 %% Visualize optimized solution
 % opt_visualize(x, struct([]), []); % superseded; all iterations are saved
@@ -89,7 +89,6 @@ x_env = max(x_array) - min(x_array);
 y_env = max(y_array) - min(y_array);
 
 %% Save workspace variables to file
-% date = "2024-03-03";
 date = string(datetime('today', 'Format', 'yyyy-MM-dd'));
 save(strcat("soln_values_", date))
 

@@ -24,7 +24,7 @@ function f = opt_objective(vars)
 
     % Goals (mm)
 %     EE_dx_des = 44;
-    EE_dy_des = 11.5;
+    EE_dy_des = 8;
 %     IN_dx_des = 22;
 %     IN_dy_des = 0;
 
