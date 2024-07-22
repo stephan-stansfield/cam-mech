@@ -319,7 +319,7 @@ class CamGeneration:
         angles_interp = dup_removed[0]
         radii_interp = dup_removed[1]
 
-        # Pad arrays to ensure continuity at end points. Linearly interpolate
+        # Pad arrays to ensure continuity at end points. Cubically interpolate
         # between points in polar coordinates and return.
         radii_interp = np.append(radii_interp, radii_interp[0])
         angles_interp = np.append(angles_interp, angles_interp[0] + 2*np.pi)
@@ -644,7 +644,9 @@ class CamGeneration:
 
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(angles_stand, radii_interp, label='Sitting cam')
+        ax.plot(angles_stand, 100*radii_interp, label='Sitting cam')
+        ax.set_xticklabels([])
+        ax.set_title("Stand-to-Sit Cam")
         plt.show()
 
         # Convert radii to Cartesian points for saving.
