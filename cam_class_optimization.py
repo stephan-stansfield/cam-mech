@@ -117,8 +117,8 @@ class CamGeneration:
         
         # Calculate points of convex hull for each cam. Results are cam radii
         # (polar coordinates).
-        cam_radii_inner = self.convex_cam_pts(self.pts_inner, plot)
-        cam_radii_outer = self.convex_cam_pts(self.pts_outer, plot)
+        cam_radii_inner = self.convex_cam_pts(self.pts_inner, self.angles, plot)
+        cam_radii_outer = self.convex_cam_pts(self.pts_outer, self.angles, plot)
         self.cam_radii = np.vstack((cam_radii_inner, cam_radii_outer)).T
 
         if plot:
@@ -156,12 +156,11 @@ class CamGeneration:
 
         # Rotate values in outer cam to account for where elastic band leaves
         # surface relative to where cable leaves surface.
-        cam_rotated, cam_original = self.rotate_cam(self.cam_radii[:, 1])
-        # self.cam_offset = self.cam_radii[:, 1].copy()
+        cam_rotated, cam_original = self.rotate_cam(self.cam_radii[:, 1])        # self.cam_offset = self.cam_radii[:, 1].copy()
         # outer_1 = self.cam_radii[:self.offset_ind, 1]
         # outer_2 = self.cam_radii[self.offset_ind:, 1]
         # cam_rotated = np.concatenate((outer_2, outer_1))
-        # self.cam_radii[:, 1] = cam_rotated
+        self.cam_radii[:, 1] = cam_rotated
 
         if plot:
             self.plot_cams(self.cam_radii, k_elastic, index)
@@ -427,16 +426,16 @@ class CamGeneration:
         # interpolation.
         dup_removed = self.remove_duplicates(x_cable, self.angles[:x_cable.size], x_elastic)
         x_cable = dup_removed[0]
-        angles = dup_removed[1]
+        self.angles = dup_removed[1]
         x_elastic = dup_removed[2]
 
         # Use cable displacement scaled to knee angle to find cam angle.
         # Then use cam angle to find elastic band displacement and force.
         # Finally, find cable force based on the elastic tension and gear ratio
         # at each point.
-        cable_fcn = interpolate.interp1d(x_cable, angles[:x_cable.size],
+        cable_fcn = interpolate.interp1d(x_cable, self.angles[:x_cable.size],
                                          kind='cubic', fill_value='extrapolate')
-        elastic_fcn = interpolate.interp1d(angles[:x_cable.size], x_elastic,
+        elastic_fcn = interpolate.interp1d(self.angles[:x_cable.size], x_elastic,
                                            kind='cubic', fill_value='extrapolate')
         angle_scaled = cable_fcn(x_cable_scaled)
         x_elastic_scaled = elastic_fcn(angle_scaled)
@@ -722,10 +721,10 @@ class CamGeneration:
         ax.grid(True)
         ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k_elastic} N/m""")
 
-        filepath = 'results/cams/cams_' + self.dateStr
+        filepath = 'results/cams/cams_' + self.dateStr + '/plots'
         if not path.exists(filepath):
             makedirs(filepath)
-        filename = filepath + '/plots/cam_plot_' + str(index) + '.png'
+        filename = filepath + '/cam_plot_' + str(index) + '.png'
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.show()
 
