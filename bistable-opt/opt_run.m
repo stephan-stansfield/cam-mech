@@ -77,7 +77,7 @@ INdx = keypoints(3, 6) - keypoints(1, 6);
 INdy = keypoints(4, 6) - keypoints(2, 6);
 
 EEdx_des = 2.38*1.50*2;
-EEdy_des = 11.5;
+EEdy_des = 8.19;
 
 diff_x = EEdx - EEdx_des;
 diff_y = EEdy - EEdy_des;
