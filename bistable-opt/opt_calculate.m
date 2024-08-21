@@ -13,6 +13,10 @@ function keypoints = opt_calculate(vars)
     sol_eta = eval(sol_eta);
     sol_b = eval(sol_b);
 
+    sol_eta_deg = rad2deg(sol_eta)
+    sol_b_deg = rad2deg(sol_b)
+
+
     % if no solution was found, assign zeros to keypoints and end execution
     if isempty(sol_eta)
         keypoints = zeros(4,6);
