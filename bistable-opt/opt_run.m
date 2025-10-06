@@ -62,7 +62,7 @@ delta_deg = rad2deg(delta);
 epsilon_deg = rad2deg(epsilon);
 
 % Get solution keypoints from optimized lengths & angles
-keypoints = opt_calculate(x);
+[keypoints, ~] = opt_calculate(x);
 
 toc;
 

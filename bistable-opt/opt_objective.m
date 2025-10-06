@@ -8,7 +8,7 @@ function f = opt_objective(vars)
 
     % Solve kinematic chain with provided inputs. If a solution exists, 
     % returns x- and y-coordinates of the two solutions in an array.
-    keypoints = opt_calculate(vars);
+    [keypoints, ~] = opt_calculate(vars);
 %     EE_dx = keypoints(3, 5) - keypoints(1, 5);
     EE_dy = keypoints(4, 5) - keypoints(2, 5);
 %     IN_dx = keypoints(3, 6) - keypoints(1, 6);

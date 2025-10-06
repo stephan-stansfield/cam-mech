@@ -11,7 +11,7 @@ function [cineq, ceq] = opt_constraints(vars)
     % Solve kinematic chain with provided inputs. If a solution exists, 
     % returns x- and y-coordinates of the two solutions in an array. If a
     % solution doesn't exist, returns same-sized array of zeros.
-    keypoints = opt_calculate(vars);
+    [keypoints, soln_angles] = opt_calculate(vars);
     [r_A1, r_B1, r_C1, r_D1, r_E1, r_F1, ~, ~, r_C2, r_D2, r_E2, r_F2] = unpack_keypoints(keypoints);
 
     % Evaluate constraints
@@ -27,6 +27,8 @@ function [cineq, ceq] = opt_constraints(vars)
     EE_y_1 = keypoints(2, 5);
     EE_y_2 = keypoints(4, 5);
     EE_dx = keypoints(3,5) - keypoints(1,5);
+    EE_dy = abs(EE_y_2 - EE_y_1);
+    EE_dy_min = 4.0;        
     D_cable = 1/16 * 25.4;  % 1/16" diameter cable
     scale_groove = 1.50;    % groove diameter is 150% larger than cable diameter
     D_groove = scale_groove * D_cable;
@@ -44,6 +46,25 @@ function [cineq, ceq] = opt_constraints(vars)
     % Intersection with wall constraint
     m = (r_B1(2) - r_A1(2)) / (r_B1(1) - r_A1(1)); % b is constrained to be at (0,0)
 
+    % Low-to-high cantilever link (AC) angle constraint
+    alpha = vars(8);
+    beta1 = soln_angles(1);
+    beta2 = soln_angles(3);
+    disp(['alpha: ', num2str(rad2deg(alpha))]);
+    disp(['beta1: ', num2str(rad2deg(beta1))]);
+    disp(['beta2: ', num2str(rad2deg(beta2))]);
+    if beta1 < 0
+        beta1 = beta1 + 2*pi();
+        disp(['positive beta1: ', num2str(rad2deg(beta1))]);
+    end
+    if beta2 < 0
+        beta2 = beta2 + 2*pi();
+        disp(['positive beta2: ', num2str(rad2deg(beta2))]);
+    end
+    link_angle = alpha + min(beta1, beta2);
+    link_angle_min = 2*pi()/3;
+    disp(['link angle: ', num2str(rad2deg(link_angle))])
+
 %     % End effector travel goals (mm)
 %     EE_dx_des = 44;
 %     EE_dy_des = 24;
@@ -59,16 +80,19 @@ function [cineq, ceq] = opt_constraints(vars)
 %               m*r_F1(1) - r_F1(2), ...
 %               m*r_C2(1) - r_C2(2), m*r_D2(1) - r_D2(2), m*r_E2(1) - r_E2(2),...   
 %               m*r_F2(1) - r_F2(2)];
-    cineq = [ y_env - y_envMax, ...                                         % envelope dimensions are less than limits
-              x_env - x_envMax, ...
-              m*r_C1(1) - r_C1(2), m*r_D1(1) - r_D1(2), m*r_E1(1) - r_E1(2),...   % all points lie to top-right of line between A & B
-              m*r_F1(1) - r_F1(2), ...
-              m*r_C2(1) - r_C2(2), m*r_D2(1) - r_D2(2), m*r_E2(1) - r_E2(2),...   
-              m*r_F2(1) - r_F2(2),...
-              dx_IN_min - IN_dx, IN_dy - dy_IN_max, ...                     % input point travel constraints (x minimum, y maximum)
-              EE_dx_min - abs(EE_dx), ...                                   % end effector minimum x travel
-              abs(EE_dx) - EE_dx_max, ...                                   % end effector maximum x travel
-              IN_y_1 - EE_y_1, IN_y_2 - EE_y_2];                            % input point is always below end effector point in y
+    cineq = [   y_env - y_envMax, ...                                       % envelope dimensions are less than limits
+                x_env - x_envMax, ...
+                m*r_C1(1) - r_C1(2), m*r_D1(1) - r_D1(2), m*r_E1(1) - r_E1(2),...   % all points lie to top-right of line between A & B
+                m*r_F1(1) - r_F1(2), ...
+                m*r_C2(1) - r_C2(2), m*r_D2(1) - r_D2(2), m*r_E2(1) - r_E2(2),...   
+                m*r_F2(1) - r_F2(2),...
+                dx_IN_min - IN_dx, IN_dy - dy_IN_max, ...                   % input point travel constraints (x minimum, y maximum)
+                EE_dx_min - abs(EE_dx), ...                                 % end effector minimum x travel
+                abs(EE_dx) - EE_dx_max, ...                                 % end effector maximum x travel
+                IN_y_1 - EE_y_1, IN_y_2 - EE_y_2, ...                       % input point is always below end effector point in y
+                link_angle_min - link_angle, ...                            % cantilever link angle is in usable range
+                EE_dy_min - EE_dy];                                         % end-effector min. movement - prevents solutions where AC & CD are colinear
+                
 
     % Equality constraints
     ceq = [];

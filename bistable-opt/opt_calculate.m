@@ -1,4 +1,4 @@
-function keypoints = opt_calculate(vars)
+function [keypoints, soln_angles] = opt_calculate(vars)
 
    syms b e real
 
@@ -17,9 +17,10 @@ function keypoints = opt_calculate(vars)
     sol_b_deg = rad2deg(sol_b)
 
 
-    % if no solution was found, assign zeros to keypoints and end execution
+    % if no solution was found, assign zeros to keypoints and angle and end execution
     if isempty(sol_eta)
         keypoints = zeros(4,6);
+        soln_angles = zeros(4,1);
         return
     end
     
@@ -27,21 +28,23 @@ function keypoints = opt_calculate(vars)
     
     %% First solution
     % Choose one solution
-    b = sol_b(1);
-    e = sol_eta(1);
+    b1 = sol_b(1);
+    e1 = sol_eta(1);
     
     % Get keypoints of solved kinematic chain
-    [rA1, rB1, rC1, rD1, rE1, rF1] = fun_FK(b, e, vars);
+    [rA1, rB1, rC1, rD1, rE1, rF1] = fun_FK(b1, e1, vars);
 
     %% Second solution
-    b = sol_b(2);
-    e = sol_eta(2);
+    b2 = sol_b(2);
+    e2 = sol_eta(2);
     
     % Get keypoints of solved kinematic chain
-    [rA2, rB2, rC2, rD2, rE2, rF2] = fun_FK(b, e, vars);
+    [rA2, rB2, rC2, rD2, rE2, rF2] = fun_FK(b2, e2, vars);
 
     % Return keypoints of both solutions in a multi-dim array
     keypoints = [rA1, rB1, rC1, rD1, rE1, rF1;
                  rA2, rB2, rC2, rD2, rE2, rF2];
+
+    soln_angles = [b1, e1, b2, e2];
 
 end
