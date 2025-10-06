@@ -7,31 +7,31 @@
 
 "min-diameter"=70
 
-"alpha"=50.9
+"alpha"=143.6120
 
-"beta"=26.83
+"beta"=
 
-"gamma"=148.6
+"gamma"=119.5526
 
-"delta"=65.0
+"delta"=145.9637
 
-"epsilon"=65.3
+"epsilon"=6.7452
 
-"eta"=-261.68
+"eta"=
 
-"l_AB"=14.55
+"l_AB"=8.8212
 
-"l_AC"=4.49
+"l_AC"=4.4914
 
-"l_BD"=10.61
+"l_BD"=5.2707
 
-"l_CD"=3.80
+"l_CD"=3.8848
 
-"l_CE"=14.05
+"l_CE"=17.6549
 
-"l_DF"=5.47
+"l_DF"=5.4552
 
-"l_OA"=6.79
+"l_OA"=7.7221
 
 "D_groove"=3.175
 
@@ -39,9 +39,9 @@
 
 "hinge_depth"=0.25
 
-"EE_dx"=8.64
+"EE_dx"=8.9056
 
-"EE_dy"=8.19
+"EE_dy"=8.1898
 
 "r_groove"="D_groove"/2
 
