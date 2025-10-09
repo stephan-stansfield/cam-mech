@@ -57,7 +57,7 @@
 
 "D_axle"=25.4/8
 
-"D_up_to_down"=19
+"D_up_to_down"=16
 
 "D_down_to_up"=25
 
