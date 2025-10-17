@@ -366,7 +366,7 @@ class CamGeneration:
         x_elastic = np.cumsum(cam_original * 2*np.pi / self.n_interp)
         f_elastic = k_elastic * x_elastic
         f_cable =  f_elastic * cam_original / cam_radii[:, 0]
-        # print(f"Elastic band stiffness {k_elastic} N/m; Pulling distance {x_elastic[self.sit_ind]} m")
+        print(f"Elastic band stiffness {k_elastic} N/m; Pulling distance {x_elastic[self.sit_ind]} m")
 
         # Stored energy vs. elastic band displacement
         # E = 0.5 * k_elastic * x_elastic**2
@@ -409,14 +409,14 @@ class CamGeneration:
             plt.xlabel('knee angle (degree)')
             plt.ylabel('cable displacement, xc (m)')
             plt.title('knee angle and cable displacement linear relationship')
-            
+            """
 
             # plot stance percentage vs. cable displacement
             plt.figure()
             plt.plot(percentages, x_cable_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cable Displacement (m)')
-            """
+
 
         if np.any(np.isnan(x_cable)):
             print("Warning: NaN in cam radii")
@@ -451,13 +451,20 @@ class CamGeneration:
             plt.plot(percentages, angle_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cam Angle (rad)')
+            """
 
             # plot elastic band displacement vs. stance percentage
             plt.figure()
             plt.plot(percentages, x_elastic_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Elastic displacement (m)')
-            """
+
+            # plot elastic band force vs. elastic band displacement
+            plt.figure()
+            plt.plot(x_elastic_scaled, f_cable_scaled)
+            plt.xlabel('Elastic displacement (m)')
+            plt.ylabel('Elastic force (N)')
+            plt.title('Elastic force vs. displacement)')
             
             # Cable force vs. stance percentage
             plt.figure()
@@ -482,7 +489,7 @@ class CamGeneration:
                 plt.ylabel('Torque (N-m)')
             plt.show()
 
-            np.savetxt(filepath + '/_force_output.csv',
+            np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
                        np.stack((self.angles, x_cable, f_elastic, f_cable),
                                 axis=1),
                                 header='angles(rad), pulling distance(m), \
