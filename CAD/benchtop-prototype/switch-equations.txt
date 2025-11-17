@@ -30,6 +30,6 @@
 "switch_EE-up_base_dy"=24
 "switch_EE-down_base_dy"=16
 "D_axle"=25.4/8
-"D_up_to_down"=16
-"D_down_to_up"=25
+"D_up_to_down"=24
+"D_down_to_up"=22
 "t_cam_base"=7.5
