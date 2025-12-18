@@ -1,5 +1,6 @@
 """Using python 3.10"""
 import math
+import csv
 from datetime import date
 from os import path, makedirs
 
@@ -466,7 +467,7 @@ class CamGeneration:
             plt.ylabel('Elastic force (N)')
             plt.title('Elastic force vs. displacement)')
             
-            # Cable force vs. stance percentage
+            # plot & save cable force vs. stance percentage
             plt.figure()
             plt.plot(percentages, f_cable_scaled,
                      label='Cable Force', linewidth=3)
@@ -489,11 +490,16 @@ class CamGeneration:
                 plt.ylabel('Torque (N-m)')
             plt.show()
 
-            np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
-                       np.stack((self.angles, x_cable, f_elastic, f_cable),
-                                axis=1),
-                                header='angles(rad), pulling distance(m), \
-                                    elastic band force(n), cable force(n)')
+            fields = ['Angles(rad)', 'Transmission cable displacement (m)', \
+                'Transmission cable force (N)', 'Storage cable displacment (m)', \
+                'Storage cable force (N)',]
+            rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
+
+            # np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
+            #            np.stack((self.angles, x_cable, f_elastic, f_cable),
+            #                     axis=1),
+            #                     header='angles(rad), pulling distance(m), \
+            #                         elastic band force(n), cable force(n)')
             
         return f_cable_scaled, percentages
     
