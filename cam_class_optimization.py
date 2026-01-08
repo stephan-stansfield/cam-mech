@@ -143,7 +143,7 @@ class CamGeneration:
         # minimum radius, in meters, is not violated.
         ratio = 0
         threshold = 0.01
-        r_min = 0.25*.0254
+        r_min = 0.25 * .0254 # convert from inches to meters
         while abs(ratio - 1) > threshold:
             x_cable = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
             ratio = stroke / x_cable[self.sit_ind]
@@ -382,23 +382,12 @@ class CamGeneration:
             plt.ylabel('Force (N)')
             plt.show()
 
-        # Create a function that relates knee angle to stance percentage using
-        # angle_data, accounting for nonlinear change in knee angle while 
-        # standing. Percentages go from ~0% to ~100% going from sit to stand.
-        angle_data = 'data/Knee-angle_Chugo_2006.csv'
-        knee_array = np.loadtxt(angle_data, delimiter = ',', ndmin = 2)
-        percentages = knee_array[:, 0]
-        knee_angles = knee_array[:, 1]
-        knee_fcn = interpolate.interp1d(percentages, knee_angles,
-                                        kind='cubic', fill_value='extrapolate')
+        # Generate knee angles corresponding to stance percentage
         percentages = np.linspace(0, 100, self.sit_ind + 1)
-        knee_angles = knee_fcn(percentages)
+        knee_angles = self.knee_angle_to_stance(percentages)
 
-        # Flip arrays to go from standing (100%) to sitting (0%), since cable
-        # displacement is 0 at 100% stance. Then scale cable displacement by the
-        # normalized knee angle.
-        knee_angles = np.flip(knee_angles)
-        percentages = np.flip(percentages)
+        # Scale cable displacement by the normalized knee angle. Maximum cable
+        # displacement occurs at the sit index
         x_cable_scaled = (x_cable[self.sit_ind]
                           * (1 - (knee_angles-np.min(knee_angles))
                                  / np.ptp(knee_angles))) 
@@ -430,16 +419,22 @@ class CamGeneration:
         self.angles = dup_removed[1]
         x_elastic = dup_removed[2]
 
-        # Use cable displacement scaled to knee angle to find cam angle.
-        # Then use cam angle to find elastic band displacement and force.
-        # Finally, find cable force based on the elastic tension and gear ratio
-        # at each point.
+        # Create functions relating transmission cable displacement to cam 
+        # angle and relating cam angle to storage cable displacement.
         cable_fcn = interpolate.interp1d(x_cable, self.angles[:x_cable.size],
                                          kind='cubic', fill_value='extrapolate')
         elastic_fcn = interpolate.interp1d(self.angles[:x_cable.size], x_elastic,
                                            kind='cubic', fill_value='extrapolate')
+        
+        # Use cable displacement scaled to knee angle to find cam angle as
+        # driven by knee rotation.
         angle_scaled = cable_fcn(x_cable_scaled)
+
+        # Use knee-driven cam angle to find storage cable displacement.
         x_elastic_scaled = elastic_fcn(angle_scaled)
+
+        # Find transmission cable force based on the storage cable displacement,
+        # spring stiffness, and gear ratio at each point.
         f_cable_scaled = (cam_original[: self.sit_ind+1] /
                           cam_radii[: self.sit_ind+1, 0]
                           * k_elastic * x_elastic_scaled)
@@ -454,20 +449,22 @@ class CamGeneration:
             plt.ylabel('Cam Angle (rad)')
             """
 
-            # plot elastic band displacement vs. stance percentage
+            # Plot storage cable displacement vs. stance percentage. Flip 
+            # percentages, since storage cable displacement is opposite to
+            # transmission cable.
             plt.figure()
             plt.plot(percentages, x_elastic_scaled)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Elastic displacement (m)')
+            plt.ylabel('Storage cable displacement (m)')
 
-            # plot elastic band force vs. elastic band displacement
+            # Plot storage cable force vs. displacement.
             plt.figure()
             plt.plot(x_elastic_scaled, f_cable_scaled)
             plt.xlabel('Elastic displacement (m)')
             plt.ylabel('Elastic force (N)')
             plt.title('Elastic force vs. displacement)')
             
-            # plot & save cable force vs. stance percentage
+            # Plot & save transmission cable force vs. stance percentage.
             plt.figure()
             plt.plot(percentages, f_cable_scaled,
                      label='Cable Force', linewidth=3)
@@ -495,13 +492,39 @@ class CamGeneration:
                 'Storage cable force (N)',]
             rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
 
-            # np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
-            #            np.stack((self.angles, x_cable, f_elastic, f_cable),
-            #                     axis=1),
-            #                     header='angles(rad), pulling distance(m), \
-            #                         elastic band force(n), cable force(n)')
+            np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
+                       np.stack((self.angles, x_cable, f_elastic, f_cable),
+                                axis=1),
+                                header='angles(rad), pulling distance(m), \
+                                    elastic band force(n), cable force(n)')
             
         return f_cable_scaled, percentages
+    
+    def knee_angle_to_stance(self, percentages_in):
+        '''
+        Create a function that relates knee angle to stance percentage using
+        angle_data, accounting for nonlinear change in knee angle while 
+        standing. Percentages go from ~0% to ~100% going from sit to stand.
+        If no input percentages are provided, produces knee angles using evenly
+        spaced percentages with same number of indices as sit data.
+        '''
+        angle_data = 'data/Knee-angle_Chugo_2006.csv'
+        knee_array = np.loadtxt(angle_data, delimiter = ',', ndmin = 2)
+        percentages = knee_array[:, 0]
+        knee_angles = knee_array[:, 1]
+        knee_fcn = interpolate.interp1d(percentages, knee_angles,
+                                        kind='cubic', fill_value='extrapolate')
+        knee_angles = knee_fcn(percentages_in)
+        return knee_angles
+    
+    def percentage_to_x(self, percentages_in, stroke):
+        # Generate knee angles corresponding to stance percentage.
+        knee_angles = self.knee_angle_to_stance(percentages_in)
+
+        # Map transmission cable stroke to stance percentage.
+        x_cable_original = (stroke * (1 - (knee_angles - np.min(knee_angles))
+                                 / np.ptp(knee_angles))) 
+        return x_cable_original
     
     def generate_sit_cam(self, radii_stand, angles_stand, radii_outer, k_elastic,
                          n_params=6):
