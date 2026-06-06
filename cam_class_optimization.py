@@ -20,6 +20,83 @@ from scipy.integrate import trapezoid
 from collections import defaultdict
 
 
+def read_xy_from_csv(csv_filepath, x_col=0, y_col=1, delimiter=','):
+    """Read ordered x,y points from a CSV file.
+
+    Parameters:
+    csv_filepath: str
+        Path to a CSV file with at least two columns of numeric data.
+    x_col: int, optional
+        Column index for x coordinates. Default is 0.
+    y_col: int, optional
+        Column index for y coordinates. Default is 1.
+    delimiter: str, optional
+        Field delimiter for the CSV file. Default is ','.
+
+    Returns:
+    x: numpy.ndarray
+        Array of x coordinate values.
+    y: numpy.ndarray
+        Array of y coordinate values.
+    """
+    df = pd.read_csv(csv_filepath, header=None, comment='#', delimiter=delimiter)
+    if df.shape[1] < 2:
+        raise ValueError("CSV file must contain at least two columns of numeric x and y data.")
+    df = df.iloc[:, [x_col, y_col]].apply(pd.to_numeric, errors='coerce')
+    if df.isna().any().any():
+        raise ValueError("CSV file contains non-numeric values in the x or y columns.")
+    x = df.iloc[:, 0].to_numpy(dtype=float)
+    y = df.iloc[:, 1].to_numpy(dtype=float)
+    return x, y
+
+
+def curve_length_from_csv(csv_filepath, n_eval=1000, spline_order=3,
+                          x_col=0, y_col=1, delimiter=','):
+    """Compute cumulative spline lengths for ordered CSV points.
+
+    The function reads x/y points from the provided CSV file, constructs a
+    parametric spline curve that passes through the points in order, and
+    returns the cumulative arc length at each original point.
+
+    Parameters:
+    csv_filepath: str
+        Path to the CSV file containing ordered x and y coordinates.
+    n_eval: int, optional
+        Number of points to evaluate along the spline for length estimation.
+    spline_order: int, optional
+        Order of the spline. Default is 3 (cubic) and is automatically reduced
+        when there are too few data points.
+    x_col: int, optional
+        Index of the column containing x coordinates.
+    y_col: int, optional
+        Index of the column containing y coordinates.
+    delimiter: str, optional
+        Field delimiter used by the CSV file.
+
+    Returns:
+    numpy.ndarray
+        Array of cumulative arc lengths at each data point, in the same order
+        as the input points.
+    """
+    x, y = read_xy_from_csv(csv_filepath, x_col=x_col, y_col=y_col,
+                            delimiter=delimiter)
+    if x.size < 2:
+        return np.zeros(x.shape, dtype=float)
+    t = np.linspace(0.0, 1.0, x.size)
+    k = min(spline_order, x.size - 1)
+    spline = make_interp_spline(t, np.column_stack((x, y)), k=k, axis=0)
+
+    n_eval = max(n_eval, x.size)
+    t_eval = np.linspace(t[0], t[-1], n_eval)
+    derivative = spline.derivative()
+    dx_dy = derivative(t_eval)
+    speeds = np.hypot(dx_dy[:, 0], dx_dy[:, 1])
+
+    dt = t_eval[1] - t_eval[0]
+    cumulative = np.concatenate(([0.0], np.cumsum((speeds[:-1] + speeds[1:]) * 0.5 * dt)))
+    return np.interp(t, t_eval, cumulative)
+
+
 font = {'size': 14}
 matplotlib.rc('font', **font)
 
@@ -354,7 +431,7 @@ class CamGeneration:
                     torque=False, plot=False, index=0):
         """Calculate the force profiles vs stance percentage given the solved
         cam radii. The order of causality is:
-        stance percentage -> knee angle -> cable displacement -> cam angle -> 
+        stance percentage -> knee angle -> scaled cable displacement -> cam angle -> 
         elastic band displacement -> elastic band force -> cable force
         """
         # Obtain original outer cam radii
@@ -373,10 +450,19 @@ class CamGeneration:
         # E = 0.5 * k_elastic * x_elastic**2
         E = trapezoid(f_elastic, x_elastic)
         print(f"Total energy stored in elastic band: {E} J")
+
         if plot:
             plt.figure()
-            plt.plot(100*x_elastic, f_elastic,
-                     label='Elastic force vs. displacement', linewidth=3)
+            plt.plot(100*x_cable[:self.sit_ind], f_cable,
+                     label='Transmission cable force vs. displacement; unscaled', linewidth=3)
+            plt.legend(loc='upper right')
+            plt.xlabel('Transmission cable displacement (cm)')
+            plt.ylabel('Force (N)')
+            plt.show()
+
+            plt.figure()
+            plt.plot(100*x_elastic[:self.sit_ind], f_elastic,
+                     label='Elastic force vs. displacement; unscaled', linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Elastic band displacement (cm)')
             plt.ylabel('Force (N)')
@@ -405,7 +491,7 @@ class CamGeneration:
             plt.figure()
             plt.plot(percentages, x_cable_scaled)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Cable Displacement (m)')
+            plt.ylabel('Transmission Cable Displacement (m)')
 
 
         if np.any(np.isnan(x_cable)):
@@ -457,12 +543,12 @@ class CamGeneration:
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Storage cable displacement (m)')
 
-            # Plot storage cable force vs. displacement.
-            plt.figure()
-            plt.plot(x_elastic_scaled, f_cable_scaled)
-            plt.xlabel('Elastic displacement (m)')
-            plt.ylabel('Elastic force (N)')
-            plt.title('Elastic force vs. displacement)')
+            # # Plot storage cable force vs. displacement.
+            # plt.figure()
+            # plt.plot(x_elastic_scaled, f_cable_scaled) # Note: this plot doesn't agree with the labels. Believe it was a typo.
+            # plt.xlabel('Elastic displacement (m)')
+            # plt.ylabel('Elastic force (N)')
+            # plt.title('Elastic force vs. displacement)')
             
             # Plot & save transmission cable force vs. stance percentage.
             plt.figure()
@@ -478,6 +564,19 @@ class CamGeneration:
                 makedirs(filepath)
             filename = filepath + '/force_plot_' + str(index) + '.png'
             plt.savefig(filename, dpi=300)
+
+            # Plot & save transmission cable force vs. scaled cable displacement
+            plt.figure()
+            plt.plot(100 * x_cable_scaled, f_cable_scaled)
+            plt.xlabel('Transmission cable displacement (cm)')
+            plt.ylabel('Transmission cable force (N)')
+            plt.title('Transmission cable force vs. displacement; scaled to knee angle')
+            filepath = 'results/force_plots/force_plots_' + self.dateStr
+            if not path.exists(filepath):
+                makedirs(filepath)
+            filename = filepath + '/force_plot_unscaled_' + str(index) + '.png'
+            plt.savefig(filename, dpi=300)
+
 
             if torque:
                 plt.figure()
