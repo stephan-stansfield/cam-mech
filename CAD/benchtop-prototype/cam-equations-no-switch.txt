@@ -33,3 +33,4 @@
 "D_up_to_down"=23.5
 "D_down_to_up"=22
 "t_cam_base"=25.4/8
+"t_slider_add"=3.8685
