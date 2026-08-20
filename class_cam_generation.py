@@ -1,13 +1,45 @@
-"""Using python 3.10"""
+"""
+cam-mech: cam generation utilities
+
+Provides CamGeneration and helper functions for reading CSV data,
+computing curve lengths, and converting between Cartesian and polar
+coordinates. This module is intended to be used as a library and
+avoids doing heavy computation on import.
+
+The public API includes:
+- read_xy_from_csv
+- curve_length_from_csv
+- CamGeneration
+
+"""
+from __future__ import annotations
+
 import math
 import csv
 from datetime import date
-from os import path, makedirs
+from pathlib import Path
+from typing import Optional, Tuple
+import logging
 
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
 import pandas as pd
+
+# Module logger
+logger = logging.getLogger(__name__)
+
+
+def _get_plt():
+    """Lazily import matplotlib.pyplot for plotting helpers.
+
+    Raises a RuntimeError if matplotlib is not available.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as e:
+        logger.error("matplotlib is required for plotting but is not available: %s", e)
+        raise RuntimeError("matplotlib is required for plotting") from e
+    return plt
+
 from scipy import interpolate
 from scipy.interpolate import make_interp_spline, BSpline
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
@@ -15,7 +47,7 @@ from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from scipy.optimize import LinearConstraint
 from scipy.optimize import NonlinearConstraint
 from scipy.optimize import Bounds
-from cobyqa import minimize
+# 'minimize' from cobyqa is imported lazily inside optimize routines to avoid importing heavy optional deps at module import time
 from scipy.integrate import trapezoid
 from collections import defaultdict
 
@@ -98,7 +130,12 @@ def curve_length_from_csv(csv_filepath, n_eval=1000, spline_order=3,
 
 
 font = {'size': 14}
-matplotlib.rc('font', **font)
+try:
+    import matplotlib
+    matplotlib.rc('font', **font)
+except Exception:
+    logger.debug("matplotlib not available; skipping font rc setup")
+
 
 
 class CamGeneration:
@@ -136,8 +173,8 @@ class CamGeneration:
         self.dateStr = date.today().strftime("%Y-%m-%d")
         n_eval = 0
 
-    def calculate_cam_radii(self, user_height=1.67, k_elastic=0,
-                            plot=False, index=0):
+    def calculate_cam_radii(self, user_height: float = 1.67, k_elastic: float = 0,
+                            plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
         """Calculates the cam radii for each gear ratio and input angle.
         Determines the convex hull of the given gear ratios and angles, then
         interpolates between these points to generate the cam radii.
@@ -169,6 +206,7 @@ class CamGeneration:
             self.cam_radii[ind, :] = np.array([r, R])
 
         if plot:
+            plt = _get_plt()
             fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
             ax.scatter(self.input_angles, self.cam_radii[:, 0])
             ax.scatter(self.input_angles, self.cam_radii[:, 1] )
@@ -241,7 +279,8 @@ class CamGeneration:
         self.cam_radii[:, 1] = cam_rotated
 
         if plot:
-            self.plot_cams(self.cam_radii, k_elastic, index)
+            # Plot; saving is opt-in via save flag and save_dir
+            self.plot_cams(self.cam_radii, k_elastic, index, save=save, save_dir=save_dir)
 
         # Convert cam points to Cartesian space and return the final cam shapes.
         self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
@@ -408,7 +447,7 @@ class CamGeneration:
                                              fill_value='extrapolate')
         
         if np.any(np.isnan(polar_cam_fcn(angles))):
-            print("Warning: NaN in cam radii")
+            logger.warning("NaN detected in polar interpolation of cam radii")
 
         return polar_cam_fcn(angles)
     
@@ -428,7 +467,7 @@ class CamGeneration:
         return cam_derotated
     
     def calc_forces(self, cam_radii, x_cable, k_elastic,
-                    torque=False, plot=False, index=0):
+                    torque: bool = False, plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
         """Calculate the force profiles vs stance percentage given the solved
         cam radii. The order of causality is:
         stance percentage -> knee angle -> scaled cable displacement -> cam angle -> 
@@ -444,14 +483,15 @@ class CamGeneration:
         x_elastic = np.cumsum(cam_original * 2*np.pi / self.n_interp)
         f_elastic = k_elastic * x_elastic
         f_cable =  f_elastic * cam_original / cam_radii[:, 0]
-        print(f"Elastic band stiffness {k_elastic} N/m; Pulling distance {x_elastic[self.sit_ind]} m")
+        logger.info("Elastic band stiffness %s N/m; Pulling distance %s m", k_elastic, x_elastic[self.sit_ind])
 
         # Stored energy vs. elastic band displacement
         # E = 0.5 * k_elastic * x_elastic**2
         E = trapezoid(f_elastic, x_elastic)
-        print(f"Total energy stored in elastic band: {E} J")
+        logger.info("Total energy stored in elastic band: %s J", E)
 
         if plot:
+            plt = _get_plt()
             plt.figure()
             plt.plot(100*x_cable[:self.sit_ind], f_cable,
                      label='Transmission cable force vs. displacement; unscaled', linewidth=3)
@@ -479,6 +519,7 @@ class CamGeneration:
                                  / np.ptp(knee_angles))) 
 
         if plot:
+            plt = _get_plt()
             """
             plt.figure()
             plt.plot(knee_angles, x_cable_scaled)
@@ -495,7 +536,7 @@ class CamGeneration:
 
 
         if np.any(np.isnan(x_cable)):
-            print("Warning: NaN in cam radii")
+            logger.warning("NaN detected in x_cable passed to calc_forces")
         
         # Remove duplicate points from cable path information (and corresponding
         # points from the angles and elastic band path) to avoid errors in
@@ -527,6 +568,7 @@ class CamGeneration:
         
         # Plot and save values.
         if plot:
+            plt = _get_plt()
             """
             # plot cam angle vs. stance percentage
             plt.figure()
@@ -559,24 +601,23 @@ class CamGeneration:
             plt.ylabel('Force (N)')
             plt.xlim([0, 100])
             plt.ylim([0, 250])
-            filepath = 'results/force_plots/force_plots_' + self.dateStr
-            if not path.exists(filepath):
-                makedirs(filepath)
-            filename = filepath + '/force_plot_' + str(index) + '.png'
-            plt.savefig(filename, dpi=300)
+            if save:
+                filepath = save_dir or ('results/force_plots/force_plots_' + self.dateStr)
+                filename = str(Path(filepath) / f'force_plot_{index}.png')
+                # Save the plotted figure
+                self._save_plot(plt, filename)
 
-            # Plot & save transmission cable force vs. scaled cable displacement
-            plt.figure()
-            plt.plot(100 * x_cable_scaled, f_cable_scaled)
-            plt.xlabel('Transmission cable displacement (cm)')
-            plt.ylabel('Transmission cable force (N)')
-            plt.title('Transmission cable force vs. displacement; scaled to knee angle')
-            filepath = 'results/force_plots/force_plots_' + self.dateStr
-            if not path.exists(filepath):
-                makedirs(filepath)
-            filename = filepath + '/force_plot_unscaled_' + str(index) + '.png'
-            plt.savefig(filename, dpi=300)
+                # Plot & save transmission cable force vs. scaled cable displacement
+                plt.figure()
+                plt.plot(100 * x_cable_scaled, f_cable_scaled)
+                plt.xlabel('Transmission cable displacement (cm)')
+                plt.ylabel('Transmission cable force (N)')
+                plt.title('Transmission cable force vs. displacement; scaled to knee angle')
+                filename = str(Path(filepath) / f'force_plot_unscaled_{index}.png')
+                self._save_plot(plt, filename)
 
+                out_file = str(Path(filepath) / f'_force_output{index}.csv')
+                self._save_array(out_file, np.stack((self.angles, x_cable, f_elastic, f_cable), axis=1), header='angles(rad), pulling distance(m), elastic band force(n), cable force(n)')
 
             if torque:
                 plt.figure()
@@ -590,12 +631,6 @@ class CamGeneration:
                 'Transmission cable force (N)', 'Storage cable displacment (m)', \
                 'Storage cable force (N)',]
             rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
-
-            np.savetxt(filepath + '/_force_output' + str(index) + '.csv',
-                       np.stack((self.angles, x_cable, f_elastic, f_cable),
-                                axis=1),
-                                header='angles(rad), pulling distance(m), \
-                                    elastic band force(n), cable force(n)')
             
         return f_cable_scaled, percentages
     
@@ -732,24 +767,24 @@ class CamGeneration:
         ang0 = np.linspace(angles_stand[0], angles_stand[self.sit_ind], num=n_params)
         x0 = np.concatenate((ang0, rad0))
         path_length_init = np.cumsum(rad0 * 2*np.pi / n_params)[-1]
-        print(f"INTIAL GUESS PATH LENGTH: {path_length_init}")
-        print(f"INITIAL GUESS OBJECTIVE VALUE: {objective(x0)}")
+        logger.info("Initial guess path length: %s", path_length_init)
+        logger.info("Initial guess objective value: %s", objective(x0))
 
+        plt = _get_plt()
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.plot(ang0, rad0, label='Initial guess')
         plt.show()
 
         # Callback: intermittently check the optimization progress.
-        global n_eval
         n_eval = 1
         def callback_fun(x):
-            global n_eval
+            nonlocal n_eval
             if n_eval % 10 == 0:
-                print(f"Optimization iteration {n_eval}. Objective = {objective(x)}")
-                print(f"Standing path length: {path_length_stand}")
+                logger.info("Optimization iteration %s. Objective = %s", n_eval, objective(x))
+                logger.info("Standing path length: %s", path_length_stand)
                 radii_interp = interp_cam(x)
-                print(f"Current path length: {np.cumsum(radii_interp * 2*np.pi / self.n_interp)[-1]}")
+                logger.info("Current path length: %s", np.cumsum(radii_interp * 2*np.pi / self.n_interp)[-1])
                 plt.figure()
                 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
                 ax.plot(angles_stand[: self.sit_ind+1], radii_interp, label=f"Optimization iteration {n_eval}")
@@ -758,6 +793,12 @@ class CamGeneration:
             n_eval += 1
 
         # Minimize: perform the optimization.
+        # Import minimize lazily so the module can be imported without optional deps
+        try:
+            from cobyqa import minimize
+        except Exception:
+            logger.error("cobyqa.minimize is required for generate_sit_cam optimization but is not available")
+            raise
         result = minimize(objective, x0,
                           options={'maxiter': 10000},
                           constraints=cons)
@@ -770,11 +811,11 @@ class CamGeneration:
         radii_interp = interp_cam(result.x)
         radii_interp = np.concatenate((radii_interp, radii_stand[self.sit_ind+1 :]))
         x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
-        print("Sit cam path length (360 deg): ", x_cable_sit[-1])
-        print("Sit cam path length (220 deg): ", x_cable_sit[self.sit_ind])
-        print("Stand cam path length: ", path_length_stand)
-        print("Sit cam start radius: ", radii_interp[0])
-        print("Sit cam end radius: ", radii_interp[-1])
+        logger.info("Sit cam path length (360 deg): %s", x_cable_sit[-1])
+        logger.info("Sit cam path length (220 deg): %s", x_cable_sit[self.sit_ind])
+        logger.info("Stand cam path length: %s", path_length_stand)
+        logger.info("Sit cam start radius: %s", radii_interp[0])
+        logger.info("Sit cam end radius: %s", radii_interp[-1])
 
         plt.figure()
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
@@ -788,63 +829,99 @@ class CamGeneration:
 
         return result, radii_interp, x_cable_sit, result_points
     
-    def remove_duplicates(self, x, y=None, z=None):
+    def remove_duplicates(self, x: np.ndarray, y: Optional[np.ndarray] = None, z: Optional[np.ndarray] = None, *, strategy: str = 'drop_all') -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Remove duplicate values from the given array 'x' and corresponding
-        values from 'y' and 'z', if given.
+        Remove duplicates from x and corresponding entries in y and z.
 
-        Args:
-            x (ndarray): Array of values.
-            y (ndarray or None): Array of corresponding values or None.
-            z (ndarray or None): Array of corresponding values or None.
+        Parameters:
+        - x: numpy array of keys
+        - y, z: optional arrays of the same length as x
+        - strategy: how to handle repeated values in x:
+            * 'drop_all' (default): remove all occurrences of any value that
+              appears more than once (preserves only values that are unique in x)
+            * 'keep_first': keep the first occurrence of each duplicate value
+            * 'keep_last': keep the last occurrence of each duplicate value
 
         Returns:
-            ndarray: Updated array 'x' with duplicate values removed.
-            ndarray or None: Updated arrays 'y' and 'z' with corresponding
-            values removed, or None if 'y' or 'z' is None.
-
+        Tuple of (x_new, y_new, z_new) where y_new or z_new may be None if
+        corresponding inputs were None.
         """
-        # Store indices of repeated values in a dictionary.
-        repeat_dict = defaultdict(list)
-        for ind, point in enumerate(x):
-            repeat_dict[point].append(ind)
-        repeat_dict = {k:v for k,v in repeat_dict.items() if len(v)>1}
-        repeat_list = list(repeat_dict.values())
-        repeat_ind = np.array(sum(repeat_list, []))
-        
-        # If there are repeated values, print and remove them from the arrays.
-        if len(repeat_dict) > 0:
-            x = np.delete(x, repeat_ind)
-            if y is not None:
-                y = np.delete(y, repeat_ind)
-            if z is not None:
-                z = np.delete(z, repeat_ind)
-        
-        return x, y, z
+        if strategy not in {'drop_all', 'keep_first', 'keep_last'}:
+            raise ValueError("strategy must be one of 'drop_all', 'keep_first', 'keep_last'")
+
+        # Build mapping from value to list of indices
+        idx_map = defaultdict(list)
+        for i, v in enumerate(x):
+            idx_map[v].append(i)
+
+        keep_indices = []
+        if strategy == 'drop_all':
+            # Keep indices whose value occurs exactly once
+            for v, inds in idx_map.items():
+                if len(inds) == 1:
+                    keep_indices.append(inds[0])
+        elif strategy == 'keep_first':
+            for v, inds in idx_map.items():
+                keep_indices.append(inds[0])
+        else:  # keep_last
+            for v, inds in idx_map.items():
+                keep_indices.append(inds[-1])
+
+        keep_indices = np.array(sorted(keep_indices), dtype=int)
+        x_new = x[keep_indices]
+        y_new = y[keep_indices] if y is not None else None
+        z_new = z[keep_indices] if z is not None else None
+
+        return x_new, y_new, z_new
     
-    def to_polar(self, points):
-        """
-        Convert the given Cartesian points to polar coordinates.
+    def to_polar(self, points: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Convert Cartesian points to polar coordinates in [0, 2*pi).
 
-        Args:
-            points (ndarray): Array of Cartesian points.
+        Parameters:
+        - points: array of shape (N, 2)
 
         Returns:
-            ndarray: Array of radii.
-            ndarray: Array of angles.
+        - radii: shape (N,)
+        - angles: shape (N,) in radians in range [0, 2*pi)
         """
-        # Calculate radii and angles of the points.
         radii = np.linalg.norm(points, axis=1)
-        angles = np.arctan2(points[:, 1], points[:, 0])
-        for ind, angle in enumerate(angles):
-            if angle < 0:
-                angles[ind] += 2*np.pi
+        angles = np.mod(np.arctan2(points[:, 1], points[:, 0]), 2 * np.pi)
         return radii, angles
 
-    def plot_cams(self, cam_radii=0, k_elastic=0, index=0):
+    # --- File I/O helpers -------------------------------------------------
+    def _ensure_dir(self, dirpath: str | Path) -> None:
+        """Ensure a directory exists (create if needed). Accepts a string or Path."""
+        if not dirpath:
+            return
+        p = Path(dirpath)
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
+
+    def _save_plot(self, plt_module, filepath: str | Path, dpi: int = 300, bbox_inches: str | None = 'tight') -> None:
+        """Save a plot using the provided matplotlib.pyplot module.
+
+        Ensures directory exists before calling plt.savefig.
+        """
+        p = Path(filepath)
+        self._ensure_dir(p.parent)
+        # matplotlib accepts Path-like objects in recent versions but convert to str for compatibility
+        outpath = str(p)
+        if bbox_inches is not None:
+            plt_module.savefig(outpath, dpi=dpi, bbox_inches=bbox_inches)
+        else:
+            plt_module.savefig(outpath, dpi=dpi)
+
+    def _save_array(self, filepath: str | Path, arr: np.ndarray, header: str | None = None, delimiter: str = ',') -> None:
+        """Save an array to a text file, ensuring the containing directory exists."""
+        p = Path(filepath)
+        self._ensure_dir(p.parent)
+        np.savetxt(str(p), arr, delimiter=delimiter, header=header)
+
+    def plot_cams(self, cam_radii=0, k_elastic=0, index=0, save: bool = False, save_dir: Optional[str] = None):
         """
         Plots the cam points in polar coordinates.
         """
+        plt = _get_plt()
         r = 100*self.cam_radii[:, 0]
         R = 100*self.cam_radii[:, 1]
         plt.figure()
@@ -856,17 +933,17 @@ class CamGeneration:
         ax.grid(True)
         ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k_elastic} N/m""")
 
-        filepath = 'results/cams/cams_' + self.dateStr + '/plots'
-        if not path.exists(filepath):
-            makedirs(filepath)
-        filename = filepath + '/cam_plot_' + str(index) + '.png'
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        if save:
+            target_dir = save_dir or ('results/cams/cams_' + self.dateStr + '/plots')
+            filename = str(Path(target_dir) / f'cam_plot_{index}.png')
+            self._save_plot(plt, filename, bbox_inches='tight')
         plt.show()
 
     def plot_cams_cartesian(self, pts_inner, pts_outer):
         """
         Plots the cam points in Cartesian coordinates.
         """
+        plt = _get_plt()
         plt.figure()
         plt.plot(pts_inner[:, 0], pts_inner[:, 1], lw = 2)
         plt.plot(pts_outer[:, 0], pts_outer[:, 1], lw = 2)
