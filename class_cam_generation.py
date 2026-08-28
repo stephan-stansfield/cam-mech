@@ -473,7 +473,7 @@ class CamGeneration:
         stance percentage -> knee angle -> scaled cable displacement -> cam angle -> 
         elastic band displacement -> elastic band force -> cable force
         """
-        # Obtain original outer cam radii
+        # Obtain original (unrotated) storage cam radii
         cam_original = self.derotate_cam(cam_radii[:, 1])
 
         # Calculate elastic band tension from displacement around storage cam 
@@ -493,7 +493,7 @@ class CamGeneration:
         if plot:
             plt = _get_plt()
             plt.figure()
-            plt.plot(100*x_cable[:self.sit_ind], f_cable,
+            plt.plot(100*x_cable[:self.sit_ind], f_cable[:self.sit_ind],
                      label='Transmission cable force vs. displacement; unscaled', linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Transmission cable displacement (cm)')
@@ -501,7 +501,7 @@ class CamGeneration:
             plt.show()
 
             plt.figure()
-            plt.plot(100*x_elastic[:self.sit_ind], f_elastic,
+            plt.plot(100*x_elastic[:self.sit_ind], f_elastic[:self.sit_ind],
                      label='Elastic force vs. displacement; unscaled', linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Elastic band displacement (cm)')
@@ -512,28 +512,40 @@ class CamGeneration:
         percentages = np.linspace(0, 100, self.sit_ind + 1)
         knee_angles = self.knee_angle_to_stance(percentages)
 
-        # Scale cable displacement by the normalized knee angle. Maximum cable
-        # displacement occurs at the sit index
+        # Flip knee angles and percentages to correspond with cam angle order,
+        # which increases from stand to sit.
+        percentages = percentages[::-1]
+        knee_angles = knee_angles[::-1]
+
+        # Scale transmission cable displacement by the normalized knee angle.
+        # At this point, x_cable_scaled should decrease with index.
         x_cable_scaled = (x_cable[self.sit_ind]
-                          * (1 - (knee_angles-np.min(knee_angles))
-                                 / np.ptp(knee_angles))) 
+                          * (knee_angles-np.min(knee_angles))
+                          / np.ptp(knee_angles)) 
+
+        # Isolate "effective" portions of x_cable (from 0 to 220
+        # degrees) and flip order to match the order of knee angles,
+        #  which go from sit to stand. This means that x_cable_eff 
+        # and x_cable_scaled_eff are now decreasing in value.
+        x_cable = x_cable[:self.sit_ind+1]
+        x_cable = x_cable[::-1]
+        # x_cable_scaled_eff = x_cable_scaled[:self.sit_ind+1]
+        # x_cable_scaled_eff = x_cable_scaled_eff[::-1] 
 
         if plot:
             plt = _get_plt()
-            """
-            plt.figure()
-            plt.plot(knee_angles, x_cable_scaled)
-            plt.xlabel('knee angle (degree)')
-            plt.ylabel('cable displacement, xc (m)')
-            plt.title('knee angle and cable displacement linear relationship')
-            """
 
-            # plot stance percentage vs. cable displacement
+            # Plot knee angle vs. cable displacement to verify
             plt.figure()
-            plt.plot(percentages, x_cable_scaled)
+            plt.plot(knee_angles, 100 * x_cable_scaled)
+            plt.xlabel('Knee Angle (degrees)')
+            plt.ylabel('Transmission Cable Displacement, xc (cm)')
+
+            # Plot stance percentage vs. cable displacement to verify
+            plt.figure()
+            plt.plot(percentages, 100 * x_cable_scaled)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Transmission Cable Displacement (m)')
-
+            plt.ylabel('Transmission Cable Displacement (cm)')
 
         if np.any(np.isnan(x_cable)):
             logger.warning("NaN detected in x_cable passed to calc_forces")
@@ -550,7 +562,7 @@ class CamGeneration:
         # angle and relating cam angle to storage cable displacement.
         cable_fcn = interpolate.interp1d(x_cable, self.angles[:x_cable.size],
                                          kind='cubic', fill_value='extrapolate')
-        elastic_fcn = interpolate.interp1d(self.angles[:x_cable.size], x_elastic,
+        elastic_fcn = interpolate.interp1d(self.angles[:x_cable.size], x_elastic[:x_cable.size],
                                            kind='cubic', fill_value='extrapolate')
         
         # Use cable displacement scaled to knee angle to find cam angle as
@@ -560,22 +572,29 @@ class CamGeneration:
         # Use knee-driven cam angle to find storage cable displacement.
         x_elastic_scaled = elastic_fcn(angle_scaled)
 
+        # Determine gear ratio at each point based on the scaled cam angle and the original cam radii.
+        gear_ratios = cam_original[: self.sit_ind+1] / cam_radii[: self.sit_ind+1, 0]
+        gear_ratio_fcn = interpolate.interp1d(self.angles[:gear_ratios.size], gear_ratios, kind='cubic', fill_value='extrapolate')
+        gear_ratios_scaled = gear_ratio_fcn(angle_scaled)
+
         # Find transmission cable force based on the storage cable displacement,
         # spring stiffness, and gear ratio at each point.
-        f_cable_scaled = (cam_original[: self.sit_ind+1] /
-                          cam_radii[: self.sit_ind+1, 0]
-                          * k_elastic * x_elastic_scaled)
+        f_elastic_scaled = k_elastic * x_elastic_scaled
+        f_cable_scaled = gear_ratios_scaled * f_elastic_scaled
+
+        # f_cable_scaled = (cam_original[: self.sit_ind+1] /
+        #                   cam_radii[: self.sit_ind+1, 0]
+        #                   * k_elastic * x_elastic_scaled)
         
         # Plot and save values.
         if plot:
             plt = _get_plt()
-            """
+
             # plot cam angle vs. stance percentage
             plt.figure()
             plt.plot(percentages, angle_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cam Angle (rad)')
-            """
 
             # Plot storage cable displacement vs. stance percentage. Flip 
             # percentages, since storage cable displacement is opposite to
@@ -600,11 +619,12 @@ class CamGeneration:
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Force (N)')
             plt.xlim([0, 100])
-            plt.ylim([0, 250])
+            # plt.ylim([0, 250])
             if save:
                 filepath = save_dir or ('results/force_plots/force_plots_' + self.dateStr)
                 filename = str(Path(filepath) / f'force_plot_{index}.png')
                 # Save the plotted figure
+                logging.debug("Calling _save_plot with filename: %s", filename)
                 self._save_plot(plt, filename)
 
                 # Plot & save transmission cable force vs. scaled cable displacement
@@ -614,11 +634,30 @@ class CamGeneration:
                 plt.ylabel('Transmission cable force (N)')
                 plt.title('Transmission cable force vs. displacement; scaled to knee angle')
                 filename = str(Path(filepath) / f'force_plot_unscaled_{index}.png')
+                logging.debug("Calling _save_plot with filename: %s", filename)
                 self._save_plot(plt, filename)
 
                 out_file = str(Path(filepath) / f'_force_output{index}.csv')
-                self._save_array(out_file, np.stack((self.angles, x_cable, f_elastic, f_cable), axis=1), header='angles(rad), pulling distance(m), elastic band force(n), cable force(n)')
-
+                logging.debug("Calling _save_array with output file: %s", out_file)
+                self._save_array(out_file,
+                                 np.stack((self.angles,
+                                           percentages,
+                                           x_cable,
+                                           f_cable[:len(self.angles)],
+                                           f_elastic[:len(self.angles)],
+                                           x_cable_scaled,
+                                           f_cable_scaled,
+                                           f_elastic_scaled),
+                                           axis=1),
+                                 header='Angles (rad),' \
+                                 'Stance Percentage (%),' \
+                                 'Transmission Cable Displacement (m),' \
+                                 'Transmission Cable Force (N),' \
+                                 'Storage Cable Force (N),' \
+                                 'Scaled Transmission Cable Displacement (cm),' \
+                                 'Scaled Transmission Cable Force (N),' \
+                                 'Scaled Storage Cable Force (N)')
+                logging.debug("Sucessfully saved force output to: %s", out_file)
             if torque:
                 plt.figure()
                 plt.scatter(self.angles * 360 / (2*np.pi),
@@ -627,10 +666,10 @@ class CamGeneration:
                 plt.ylabel('Torque (N-m)')
             plt.show()
 
-            fields = ['Angles(rad)', 'Transmission cable displacement (m)', \
-                'Transmission cable force (N)', 'Storage cable displacment (m)', \
-                'Storage cable force (N)',]
-            rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
+            # fields = ['Angles(rad)', 'Transmission cable displacement (m)', \
+            #     'Transmission cable force (N)', 'Storage cable displacment (m)', \
+            #     'Storage cable force (N)',]
+            # rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
             
         return f_cable_scaled, percentages
     
@@ -902,14 +941,17 @@ class CamGeneration:
 
         Ensures directory exists before calling plt.savefig.
         """
+        logging.debug("In _save_plot!")
         p = Path(filepath)
         self._ensure_dir(p.parent)
         # matplotlib accepts Path-like objects in recent versions but convert to str for compatibility
         outpath = str(p)
         if bbox_inches is not None:
             plt_module.savefig(outpath, dpi=dpi, bbox_inches=bbox_inches)
+            logging.debug(f"Saved plot to {outpath} with bbox_inches={bbox_inches}")
         else:
             plt_module.savefig(outpath, dpi=dpi)
+            logging.debug(f"Saved plot to {outpath} with tight bounding box")
 
     def _save_array(self, filepath: str | Path, arr: np.ndarray, header: str | None = None, delimiter: str = ',') -> None:
         """Save an array to a text file, ensuring the containing directory exists."""
@@ -934,6 +976,7 @@ class CamGeneration:
         ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k_elastic} N/m""")
 
         if save:
+            logging.debug("Saving cam plot for index %s", index)
             target_dir = save_dir or ('results/cams/cams_' + self.dateStr + '/plots')
             filename = str(Path(target_dir) / f'cam_plot_{index}.png')
             self._save_plot(plt, filename, bbox_inches='tight')
