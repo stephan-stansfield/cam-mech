@@ -173,7 +173,7 @@ class CamGeneration:
         self.dateStr = date.today().strftime("%Y-%m-%d")
         n_eval = 0
 
-    def calculate_cam_radii(self, user_height: float = 1.67, k_elastic: float = 0,
+    def calculate_cam_radii(self, user_height: float = 1.67, k: float = 0,
                             plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
         """Calculates the cam radii for each gear ratio and input angle.
         Determines the convex hull of the given gear ratios and angles, then
@@ -260,18 +260,18 @@ class CamGeneration:
         threshold = 0.01
         r_min = 0.25 * .0254 # convert from inches to meters
         while abs(ratio - 1) > threshold:
-            x_cable = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
-            ratio = stroke / x_cable[self.sit_ind]
+            x_trans = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
+            ratio = stroke / x_trans[self.sit_ind]
             self.cam_radii *= ratio
-            x_cable *= ratio
+            x_trans *= ratio
             for cam in self.cam_radii:
                 for point in cam:
                     if point < r_min:
                         point = r_min
         radius_max = np.max(self.cam_radii)
 
-        # Rotate values in outer cam to account for where elastic band leaves
-        # surface relative to where cable leaves surface.
+        # Rotate values in outer cam to account for where storage cable leaves
+        # surface relative to where transmission cable leaves surface.
         cam_rotated, cam_original = self.rotate_cam(self.cam_radii[:, 1])        # self.cam_offset = self.cam_radii[:, 1].copy()
         # outer_1 = self.cam_radii[:self.offset_ind, 1]
         # outer_2 = self.cam_radii[self.offset_ind:, 1]
@@ -280,7 +280,7 @@ class CamGeneration:
 
         if plot:
             # Plot; saving is opt-in via save flag and save_dir
-            self.plot_cams(self.cam_radii, k_elastic, index, save=save, save_dir=save_dir)
+            self.plot_cams(self.cam_radii, k, index, save=save, save_dir=save_dir)
 
         # Convert cam points to Cartesian space and return the final cam shapes.
         self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
@@ -292,7 +292,7 @@ class CamGeneration:
     
         """ if plot:
             self.plot_cams_cartesian(self.pts_inner, self.pts_outer) """
-        return self.cam_radii, self.pts_inner, self.pts_outer, radius_max, x_cable
+        return self.cam_radii, self.pts_inner, self.pts_outer, radius_max, x_trans
 
     def convex_cam_pts(self, points, angles, plot=False):
         """
@@ -452,8 +452,8 @@ class CamGeneration:
         return polar_cam_fcn(angles)
     
     def rotate_cam(self, radii):
-        # Rotate values in outer cam to account for where elastic band leaves
-        # surface relative to where cable leaves surface.
+        # Rotate values in outer cam to account for where storage cable leaves
+        # surface relative to where transmission cable leaves surface.
         cam_original = radii.copy()
         outer_1 = radii[: self.offset_ind]
         outer_2 = radii[self.offset_ind :]
@@ -466,125 +466,139 @@ class CamGeneration:
         cam_derotated = np.concatenate((outer_1, outer_2))
         return cam_derotated
     
-    def calc_forces(self, cam_radii, x_cable, k_elastic,
+    def calc_forces(self, cam_radii, x_trans, k,
                     torque: bool = False, plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
-        """Calculate the force profiles vs stance percentage given the solved
-        cam radii. The order of causality is:
-        stance percentage -> knee angle -> scaled cable displacement -> cam angle -> 
-        elastic band displacement -> elastic band force -> cable force
         """
-        # Obtain original (unrotated) storage cam radii
-        cam_original = self.derotate_cam(cam_radii[:, 1])
+        Calculate the cable force profiles vs. stance percentage given the
+        solved cam radii.
 
-        # Calculate elastic band tension from displacement around storage cam 
-        # and using experimental stiffness characterization, simplified to be
-        # linear. Note that storage cam angle is offset. Calculate cable tension
-        # from elastic band tension and gear ratios. Values are in N, m, & N/m.
-        x_elastic = np.cumsum(cam_original * 2*np.pi / self.n_interp)
-        f_elastic = k_elastic * x_elastic
-        f_cable =  f_elastic * cam_original / cam_radii[:, 0]
-        logger.info("Elastic band stiffness %s N/m; Pulling distance %s m", k_elastic, x_elastic[self.sit_ind])
+        The order of causality is:
+        stance percentages -> 
+        knee angles ->
+        scaled transmission cable displacement ->
+        cam angles -> 
+        storage cable displacement (with spring stiffness) ->
+        storage cable force (with gear ratios) -> 
+        transmission cable force
+        """
 
-        # Stored energy vs. elastic band displacement
-        # E = 0.5 * k_elastic * x_elastic**2
-        E = trapezoid(f_elastic, x_elastic)
-        logger.info("Total energy stored in elastic band: %s J", E)
+        # Define cam radii corresponding to each angle of rotation.
+        cam_radii_trans = cam_radii[:, 0]
+        cam_radii_stor = self.derotate_cam(cam_radii[:, 1])
+
+        # Only consider "effective" portions of cams, up until sit index.
+        # cam_radii_trans = cam_radii_trans[:self.sit_ind]
+        # cam_radii_stor = cam_radii_stor[:self.sit_ind]
+
+        # Calculate effective cam moment arms and gear ratio at each angle.
+        cam_moment_arms_trans = self.get_moment_arms(cam_radii_trans, self.angles, sit_ind = self.sit_ind)
+        cam_moment_arms_stor = self.get_moment_arms(cam_radii_stor, self.angles, sit_ind = self.sit_ind)
+        gear_ratios = cam_moment_arms_stor / cam_moment_arms_trans
+
+        # Calculate storage cable displacement using the assumption of 
+        # circular shape between subsequent points.
+        # TODO: model this more accurately.
+        x_stor = np.cumsum(cam_radii_stor * 2 * np.pi / self.n_interp)
+
+        # Calculate tension in both cables.
+        f_stor = k * x_stor
+        f_trans =  f_stor * gear_ratios
+
+        # Stored energy vs. storage cable displacement
+        E = trapezoid(f_stor, x_stor)
+        logger.info("Total energy stored in storage cable: %s J", E)
 
         if plot:
             plt = _get_plt()
             plt.figure()
-            plt.plot(100*x_cable[:self.sit_ind], f_cable[:self.sit_ind],
-                     label='Transmission cable force vs. displacement; unscaled', linewidth=3)
+            plt.plot(100 * x_trans[:self.sit_ind], f_trans[:self.sit_ind],
+                     label='Transmission cable force vs. displacement (unscaled)', linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Transmission cable displacement (cm)')
             plt.ylabel('Force (N)')
             plt.show()
 
             plt.figure()
-            plt.plot(100*x_elastic[:self.sit_ind], f_elastic[:self.sit_ind],
-                     label='Elastic force vs. displacement; unscaled', linewidth=3)
+            plt.plot(100 * x_stor[:self.sit_ind], f_stor[:self.sit_ind],
+                     label='Storage cable force vs. displacement (unscaled)', linewidth=3)
             plt.legend(loc='upper right')
-            plt.xlabel('Elastic band displacement (cm)')
+            plt.xlabel('Storage cable displacement (cm)')
             plt.ylabel('Force (N)')
             plt.show()
 
-        # Generate knee angles corresponding to stance percentage
-        percentages = np.linspace(0, 100, self.sit_ind + 1)
+        # Generate knee angles corresponding to stance percentage.
+        percentages = np.linspace(0, 100, self.sit_ind) # DEBUG: changed from sit_ind + 1
         knee_angles = self.knee_angle_to_stance(percentages)
 
-        # Flip knee angles and percentages to correspond with cam angle order,
+        # Flip knee angles and percentages to correspond with cam angle index,
         # which increases from stand to sit.
         percentages = percentages[::-1]
         knee_angles = knee_angles[::-1]
 
         # Scale transmission cable displacement by the normalized knee angle.
-        # At this point, x_cable_scaled should decrease with index.
-        x_cable_scaled = (x_cable[self.sit_ind]
-                          * (knee_angles-np.min(knee_angles))
+        # At this point, x_trans_scaled should decrease with increasing index.
+        x_trans_scaled = (x_trans[self.sit_ind]
+                          * (knee_angles - np.min(knee_angles))
                           / np.ptp(knee_angles)) 
 
-        # Isolate "effective" portions of x_cable (from 0 to 220
-        # degrees) and flip order to match the order of knee angles,
-        #  which go from sit to stand. This means that x_cable_eff 
-        # and x_cable_scaled_eff are now decreasing in value.
-        x_cable = x_cable[:self.sit_ind+1]
-        x_cable = x_cable[::-1]
-        # x_cable_scaled_eff = x_cable_scaled[:self.sit_ind+1]
-        # x_cable_scaled_eff = x_cable_scaled_eff[::-1] 
+        # Isolate "effective" portions of x_trans (from 0 to 220 degrees) and
+        # flip order to match the order of knee angles, which go from sit to
+        # stand.
+        x_trans = x_trans[:self.sit_ind] # DEBUG: changed from sit_ind + 1
+        x_trans = x_trans[::-1]
 
         if plot:
             plt = _get_plt()
 
             # Plot knee angle vs. cable displacement to verify
             plt.figure()
-            plt.plot(knee_angles, 100 * x_cable_scaled)
+            plt.plot(knee_angles, 100 * x_trans_scaled)
             plt.xlabel('Knee Angle (degrees)')
             plt.ylabel('Transmission Cable Displacement, xc (cm)')
 
             # Plot stance percentage vs. cable displacement to verify
             plt.figure()
-            plt.plot(percentages, 100 * x_cable_scaled)
+            plt.plot(percentages, 100 * x_trans_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Transmission Cable Displacement (cm)')
 
-        if np.any(np.isnan(x_cable)):
-            logger.warning("NaN detected in x_cable passed to calc_forces")
+        if np.any(np.isnan(x_trans)):
+            logger.warning("NaN detected in x_trans passed to calc_forces")
         
-        # Remove duplicate points from cable path information (and corresponding
-        # points from the angles and elastic band path) to avoid errors in
-        # interpolation.
-        dup_removed = self.remove_duplicates(x_cable, self.angles[:x_cable.size], x_elastic)
-        x_cable = dup_removed[0]
-        self.angles = dup_removed[1]
-        x_elastic = dup_removed[2]
+        # Remove duplicate points from cable path information (and
+        # corresponding points from the angles and storage cable path) to 
+        # avoid errors in interpolation.
+        dup_removed = self.remove_duplicates(x_trans, self.angles[:x_trans.size], x_stor)
+        x_trans = dup_removed[0]
+        cam_angles = dup_removed[1]
+        x_stor = dup_removed[2]
 
         # Create functions relating transmission cable displacement to cam 
         # angle and relating cam angle to storage cable displacement.
-        cable_fcn = interpolate.interp1d(x_cable, self.angles[:x_cable.size],
-                                         kind='cubic', fill_value='extrapolate')
-        elastic_fcn = interpolate.interp1d(self.angles[:x_cable.size], x_elastic[:x_cable.size],
-                                           kind='cubic', fill_value='extrapolate')
+        trans_cable_displacement_to_angle = interpolate.interp1d(x_trans,
+                                                                 cam_angles,
+                                                                 kind='cubic',
+                                                                 fill_value='extrapolate')
+        cam_angle_to_stor_cable_displacement = interpolate.interp1d(cam_angles,
+                                                                    x_stor,
+                                                                    kind='cubic',
+                                                                    fill_value='extrapolate')
         
-        # Use cable displacement scaled to knee angle to find cam angle as
-        # driven by knee rotation.
-        angle_scaled = cable_fcn(x_cable_scaled)
+        # Use scaled cable displacement to find cam angle as driven by knee 
+        # rotation.
+        angle_scaled = trans_cable_displacement_to_angle(x_trans_scaled)
 
-        # Use knee-driven cam angle to find storage cable displacement.
-        x_elastic_scaled = elastic_fcn(angle_scaled)
+        # Use knee-driven cam angle to find scaled storage cable displacement.
+        x_stor_scaled = cam_angle_to_stor_cable_displacement(angle_scaled)
 
-        # Determine gear ratio at each point based on the scaled cam angle and the original cam radii.
-        gear_ratios = cam_original[: self.sit_ind+1] / cam_radii[: self.sit_ind+1, 0]
-        gear_ratio_fcn = interpolate.interp1d(self.angles[:gear_ratios.size], gear_ratios, kind='cubic', fill_value='extrapolate')
-        gear_ratios_scaled = gear_ratio_fcn(angle_scaled)
+        # Find gear ratio at each cam angle corresponding to scaled cable displacement.
+        cam_angles_to_gear_ratios = interpolate.interp1d(cam_angles, gear_ratios[:len(cam_angles)], kind='cubic', fill_value='extrapolate')
+        gear_ratios_scaled = cam_angles_to_gear_ratios(angle_scaled)
 
         # Find transmission cable force based on the storage cable displacement,
         # spring stiffness, and gear ratio at each point.
-        f_elastic_scaled = k_elastic * x_elastic_scaled
-        f_cable_scaled = gear_ratios_scaled * f_elastic_scaled
-
-        # f_cable_scaled = (cam_original[: self.sit_ind+1] /
-        #                   cam_radii[: self.sit_ind+1, 0]
-        #                   * k_elastic * x_elastic_scaled)
+        f_stor_scaled = k * x_stor_scaled
+        f_trans_scaled = f_stor_scaled * gear_ratios_scaled
         
         # Plot and save values.
         if plot:
@@ -600,20 +614,20 @@ class CamGeneration:
             # percentages, since storage cable displacement is opposite to
             # transmission cable.
             plt.figure()
-            plt.plot(percentages, x_elastic_scaled)
+            plt.plot(percentages, x_stor_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Storage cable displacement (m)')
 
             # # Plot storage cable force vs. displacement.
             # plt.figure()
-            # plt.plot(x_elastic_scaled, f_cable_scaled) # Note: this plot doesn't agree with the labels. Believe it was a typo.
-            # plt.xlabel('Elastic displacement (m)')
-            # plt.ylabel('Elastic force (N)')
-            # plt.title('Elastic force vs. displacement)')
+            # plt.plot(x_stor_scaled, f_trans_scaled) # Note: this plot doesn't agree with the labels. Believe it was a typo.
+            # plt.xlabel('Storage cable displacement (m)')
+            # plt.ylabel('Storage cable force (N)')
+            # plt.title('Storage cable force vs. displacement)')
             
             # Plot & save transmission cable force vs. stance percentage.
             plt.figure()
-            plt.plot(percentages, f_cable_scaled,
+            plt.plot(percentages, f_trans_scaled,
                      label='Cable Force', linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Stance Percentage (%)')
@@ -629,7 +643,7 @@ class CamGeneration:
 
                 # Plot & save transmission cable force vs. scaled cable displacement
                 plt.figure()
-                plt.plot(100 * x_cable_scaled, f_cable_scaled)
+                plt.plot(100 * x_trans_scaled, f_trans_scaled)
                 plt.xlabel('Transmission cable displacement (cm)')
                 plt.ylabel('Transmission cable force (N)')
                 plt.title('Transmission cable force vs. displacement; scaled to knee angle')
@@ -640,14 +654,14 @@ class CamGeneration:
                 out_file = str(Path(filepath) / f'_force_output{index}.csv')
                 logging.debug("Calling _save_array with output file: %s", out_file)
                 self._save_array(out_file,
-                                 np.stack((self.angles,
+                                 np.stack((cam_angles,
                                            percentages,
-                                           x_cable,
-                                           f_cable[:len(self.angles)],
-                                           f_elastic[:len(self.angles)],
-                                           x_cable_scaled,
-                                           f_cable_scaled,
-                                           f_elastic_scaled),
+                                           x_trans,
+                                           f_trans[:len(cam_angles)],
+                                           f_stor[:len(cam_angles)],
+                                           x_trans_scaled,
+                                           f_trans_scaled,
+                                           f_stor_scaled),
                                            axis=1),
                                  header='Angles (rad),' \
                                  'Stance Percentage (%),' \
@@ -660,8 +674,9 @@ class CamGeneration:
                 logging.debug("Sucessfully saved force output to: %s", out_file)
             if torque:
                 plt.figure()
-                plt.scatter(self.angles * 360 / (2*np.pi),
-                            f_elastic * cam_radii[:, 0])
+                plt.scatter(cam_angles * 360 / (2*np.pi),
+                            f_stor * cam_moment_arms_trans[:len(cam_angles)],
+                            label='Torque vs. angle', linewidth=3)
                 plt.xlabel('Angle (deg)')
                 plt.ylabel('Torque (N-m)')
             plt.show()
@@ -669,9 +684,64 @@ class CamGeneration:
             # fields = ['Angles(rad)', 'Transmission cable displacement (m)', \
             #     'Transmission cable force (N)', 'Storage cable displacment (m)', \
             #     'Storage cable force (N)',]
-            # rows = np.stack((self.angles, x_cable, f_cable, x_elastic, f_elastic), axis=1)
+            # rows = np.stack((cam_angles, x_trans, f_trans, x_stor, f_stor), axis=1)
             
-        return f_cable_scaled, percentages
+        return f_trans_scaled, percentages
+
+    def get_moment_arms(self, r, theta, sit_ind):
+
+        # Get the radius and angle of each point in the cam profile.
+        # print('radii: ', r)
+        # print('angles: ', theta)    
+        x_candidates = np.zeros(181) # Initialize effective radius candidates for each point
+        # y_candidates = np.zeros(181) # Initialize effective radius candidates for each point
+        # offset_ind_max = np.zeros_like(r, dtype=int) # Initialize offset index of max effective radius for each point
+        # r_effective = np.zeros((len(r), 2)) # Initialize array to hold effective radii
+        x_effective = np.zeros_like(r) # Initialize array to hold effective x-projections
+        # y_effective = np.zeros_like(r) # Initialize array to hold effective y-projections
+        # offset_deg_array = np.zeros(181, dtype=int) # Initialize array to hold offset angles for each point
+        # effective_ind_array = np.zeros(361, dtype=int) # Initialize array to hold effective indices
+
+        # For each point on the cam, find the maximum projected distance of the points that are within ±90 degrees of the point
+        # for i in range(len(r)-1):
+        n_radii = len(r[:sit_ind]) # Only consider points up to the sit index
+        for cam_deg in range(n_radii): # the angle of the "nominal" point on the cam profile
+            # print('angle index: ', ang_ind)
+            for offset_ind in range(181): # loop through 181 candidate points that are within ±90 degrees of the nominal point
+                # print('offset index: ', offset_ind)
+
+                if cam_deg + offset_ind - 90 < 0: # Don't consider points before the provided range
+                    # set the x_candidate to the first point in the range (0°)
+                    offset_deg = -cam_deg
+                elif cam_deg + offset_ind - 90 >= 360: # Don't consider points after the provided range
+                    # set the x_candidate to the last point in the range (360°)
+                    offset_deg = 360 - cam_deg
+                else:
+                    # for non-edge points, the offset is simply the index 
+                    # minus 90, which gives a range of -90 to +90 degrees 
+                    # relative to the nominal point
+                    offset_deg = offset_ind - 90
+
+                # print('offset_deg: ', offset_deg)
+
+                # Calculate the projected distance for all candidate points
+                x_candidates[offset_ind] = r[cam_deg + offset_deg] * np.cos(np.deg2rad(offset_deg))
+                # y_candidates[offset_ind] = r[cam_deg + offset_deg] * np.sin(np.deg2rad(offset_deg))
+                # offset_deg_array[offset_ind] = offset_deg
+                # print('offset_deg_array[offset_ind]: ', offset_deg_array[offset_ind])
+
+            # Get the index, radius, and x-projection of the point corresponding to the maximum projected distance
+            # max_index = np.argmax(x_candidates)
+            # max_offset_deg = offset_deg_array[max_index]
+            # offset_ind_max[cam_deg] = max_offset_deg # index of the point with the maximum projected distance, relative to the nominal point
+            # effective_ind = cam_deg + max_offset_deg
+            # effective_ind_array[cam_deg] = effective_ind
+
+            x_effective[cam_deg] = max(x_candidates)
+            # y_effective[cam_deg] = y_candidates[max_index]
+            # r_effective[cam_deg, :] = [x_effective[cam_deg], y_effective[cam_deg]]
+
+        return x_effective
     
     def knee_angle_to_stance(self, percentages_in):
         '''
@@ -695,11 +765,11 @@ class CamGeneration:
         knee_angles = self.knee_angle_to_stance(percentages_in)
 
         # Map transmission cable stroke to stance percentage.
-        x_cable_original = (stroke * (1 - (knee_angles - np.min(knee_angles))
+        x_trans_original = (stroke * (1 - (knee_angles - np.min(knee_angles))
                                  / np.ptp(knee_angles))) 
-        return x_cable_original
+        return x_trans_original
     
-    def generate_sit_cam(self, radii_stand, angles_stand, radii_outer, k_elastic,
+    def generate_sit_cam(self, radii_stand, angles_stand, radii_outer, k,
                          n_params=6):
 
         def interp_cam(x):
@@ -708,7 +778,7 @@ class CamGeneration:
             # key_radii = x[n_params:]
             # spline_fcn = interpolate.interp1d(key_angles, key_radii,
             #                                   kind='cubic', fill_value='extrapolate')
-            # radii_interp = spline_fcn(angles_stand[: self.sit_ind+1])
+            # radii_interp = spline_fcn(angles_stand[: self.sit_ind + 1])
             # return radii_interp
             # Convert radii to points in Cartesian space.
 
@@ -719,7 +789,7 @@ class CamGeneration:
                                       np.sin(key_angles)
                                       ]).T
             # Take convex hull of cam radii.
-            radii_convex = self.convex_cam_pts(points, angles_stand[: self.sit_ind+1], False)
+            radii_convex = self.convex_cam_pts(points, angles_stand[: self.sit_ind], False) # DEBUG: changed from sit_ind + 1
         
             return radii_convex
         
@@ -744,15 +814,15 @@ class CamGeneration:
         # Nonlinear contraints:
         # 1. Constrain the path lengths of the stand-to-sit and sit-to-stand
         # cams to be equal within a threshold.
-        x_cable_stand = np.cumsum(radii_stand * 2*np.pi / self.n_interp)
-        path_length_stand = x_cable_stand[self.sit_ind]
+        x_trans_stand = np.cumsum(radii_stand * 2*np.pi / self.n_interp)
+        path_length_stand = x_trans_stand[self.sit_ind]
         thresh_path = 0.001
         ub_path = path_length_stand + thresh_path
         lb_path = path_length_stand - thresh_path
         def constr_path(x):
             radii_interp = interp_cam(x)
-            x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
-            path_length_sit = x_cable_sit[-1]
+            x_trans_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
+            path_length_sit = x_trans_sit[-1]
             return path_length_sit
         path_constraint = NonlinearConstraint(constr_path, lb_path, ub_path,
                                               keep_feasible=False)
@@ -778,7 +848,7 @@ class CamGeneration:
             radii_interp = interp_cam(x)
 
             # # Convert radii to points in Cartesian space.
-            # angles = angles_stand[: self.sit_ind+1]
+            # angles = angles_stand[: self.sit_ind + 1]
             # points = (radii_interp * [np.cos(angles),
             #                           np.sin(angles)
             #                           ]).T
@@ -786,18 +856,18 @@ class CamGeneration:
             # radii_convex = self.convex_cam_pts(points, angles, False)
 
             # Prepare cam radii and cable path for force calculation.
-            cam_radii_sit = np.vstack((radii_interp, radii_outer[:self.sit_ind+1])).T
-            x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
+            cam_radii_sit = np.vstack((radii_interp, radii_outer[:self.sit_ind])).T # DEBUG: changed from sit_ind + 1
+            x_trans_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
 
-            forces, percentages = self.calc_forces(cam_radii_sit, x_cable_sit,
-                                                k_elastic, torque=False)
+            forces, percentages = self.calc_forces(cam_radii_sit, x_trans_sit,
+                                                k, torque=False)
 
             return np.max(forces)
 
         # Initial guess: a triangular profile (in terms of radii) between the
         # end points with the correct path length
         # x0 = np.linspace(radii_stand[0], radii_stand[self.sit_ind],
-        #                  num=self.sit_ind+1) # a straight line between the sit-to-stand cam radii end points.
+        #                  num=self.sit_ind + 1) # a straight line between the sit-to-stand cam radii end points.
         rmax = (path_length_stand * (self.n_interp/(np.pi * self.sit_ind)) 
                 - 0.5 * (radii_stand[0] + radii_stand[self.sit_ind]))
         rad1 = np.linspace(radii_stand[0], rmax, num=int(n_params/2))
@@ -826,7 +896,7 @@ class CamGeneration:
                 logger.info("Current path length: %s", np.cumsum(radii_interp * 2*np.pi / self.n_interp)[-1])
                 plt.figure()
                 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-                ax.plot(angles_stand[: self.sit_ind+1], radii_interp, label=f"Optimization iteration {n_eval}")
+                ax.plot(angles_stand[: self.sit_ind], radii_interp, label=f"Optimization iteration {n_eval}") # DEBUG: changed from sit_ind + 1
                 plt.title(f"Optimization iteration {n_eval}")
                 plt.show()
             n_eval += 1
@@ -848,10 +918,10 @@ class CamGeneration:
         # sit angle and above) to the stand-to-sit cam radii. Report and plot 
         # the results.
         radii_interp = interp_cam(result.x)
-        radii_interp = np.concatenate((radii_interp, radii_stand[self.sit_ind+1 :]))
-        x_cable_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
-        logger.info("Sit cam path length (360 deg): %s", x_cable_sit[-1])
-        logger.info("Sit cam path length (220 deg): %s", x_cable_sit[self.sit_ind])
+        radii_interp = np.concatenate((radii_interp, radii_stand[self.sit_ind :])) # DEBUG: changed from sit_ind + 1
+        x_trans_sit = np.cumsum(radii_interp * 2*np.pi / self.n_interp)
+        logger.info("Sit cam path length (360 deg): %s", x_trans_sit[-1])
+        logger.info("Sit cam path length (220 deg): %s", x_trans_sit[self.sit_ind])
         logger.info("Stand cam path length: %s", path_length_stand)
         logger.info("Sit cam start radius: %s", radii_interp[0])
         logger.info("Sit cam end radius: %s", radii_interp[-1])
@@ -866,7 +936,7 @@ class CamGeneration:
         # Convert radii to Cartesian points for saving.
         result_points = (radii_interp * [np.cos(self.angles), np.sin(self.angles)]).T
 
-        return result, radii_interp, x_cable_sit, result_points
+        return result, radii_interp, x_trans_sit, result_points
     
     def remove_duplicates(self, x: np.ndarray, y: Optional[np.ndarray] = None, z: Optional[np.ndarray] = None, *, strategy: str = 'drop_all') -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
         """
@@ -959,7 +1029,7 @@ class CamGeneration:
         self._ensure_dir(p.parent)
         np.savetxt(str(p), arr, delimiter=delimiter, header=header)
 
-    def plot_cams(self, cam_radii=0, k_elastic=0, index=0, save: bool = False, save_dir: Optional[str] = None):
+    def plot_cams(self, cam_radii=0, k=0, index=0, save: bool = False, save_dir: Optional[str] = None):
         """
         Plots the cam points in polar coordinates.
         """
@@ -973,7 +1043,7 @@ class CamGeneration:
         ax.legend(loc='lower right')
         ax.set_xticklabels([])
         ax.grid(True)
-        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k_elastic} N/m""")
+        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
 
         if save:
             logging.debug("Saving cam plot for index %s", index)
