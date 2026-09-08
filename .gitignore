@@ -1,3 +1,5 @@
 MY_ENV/**
 .DS_Store
 sandbox.ipynb
+__pycache__/
+*.pyc
