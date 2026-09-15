@@ -32,8 +32,14 @@ from scipy.optimize import NonlinearConstraint
 from scipy.integrate import trapezoid
 from collections import defaultdict
 
-# Initiate module logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Initiate module logger
+
+font = {'size': 14}
+try:
+    import matplotlib
+    matplotlib.rc('font', **font)
+except Exception:
+    logger.debug("matplotlib not available; skipping font rc setup")
 
 def _get_plt():
     """Lazily import matplotlib.pyplot for plotting helpers.
@@ -82,18 +88,19 @@ def curve_length_from_csv(csv_filepath, n_eval=1000, spline_order=3,
                           x_col=0, y_col=1, delimiter=','):
     """Compute cumulative spline lengths for ordered CSV points.
 
-    The function reads x/y points from the provided CSV file, constructs a
-    parametric spline curve that passes through the points in order, and
-    returns the cumulative arc length at each original point.
+    The function reads x/y points from the provided CSV file, constructs
+    a parametric spline curve that passes through the points in order,
+    and returns the cumulative arc length at each original point.
 
     Parameters:
     csv_filepath: str
         Path to the CSV file containing ordered x and y coordinates.
     n_eval: int, optional
-        Number of points to evaluate along the spline for length estimation.
+        Number of points to evaluate along the spline for length
+        estimation.
     spline_order: int, optional
-        Order of the spline. Default is 3 (cubic) and is automatically reduced
-        when there are too few data points.
+        Order of the spline. Default is 3 (cubic) and is automatically
+        reduced when there are too few data points.
     x_col: int, optional
         Index of the column containing x coordinates.
     y_col: int, optional
@@ -103,8 +110,8 @@ def curve_length_from_csv(csv_filepath, n_eval=1000, spline_order=3,
 
     Returns:
     numpy.ndarray
-        Array of cumulative arc lengths at each data point, in the same order
-        as the input points.
+        Array of cumulative arc lengths at each data point, in the same
+        order as the input points.
     """
     x, y = read_xy_from_csv(csv_filepath, x_col=x_col, y_col=y_col,
                             delimiter=delimiter)
@@ -129,9 +136,9 @@ def knee_angle_to_stance(percentages_in):
     """Map stance percentage to knee angle using reference gait data.
 
     Interpolates the knee angle vs. stance percentage relationship from
-    Chugo et al., 2006, accounting for the nonlinear change in knee angle
-    while standing. Percentages go from ~0% to ~100% going from sit to
-    stand.
+    Chugo et al., 2006, accounting for the nonlinear change in knee
+    angle while standing. Percentages go from ~0% to ~100% going from
+    sit to stand.
 
     Parameters:
     percentages_in: stance percentages (0 to 100) to convert
@@ -168,30 +175,27 @@ def percentage_to_x(percentages_in, stroke):
     return (stroke * (1 - (knee_angles - np.min(knee_angles))
                      / np.ptp(knee_angles)))
 
-font = {'size': 14}
-try:
-    import matplotlib
-    matplotlib.rc('font', **font)
-except Exception:
-    logger.debug("matplotlib not available; skipping font rc setup")
-
 class CamGeneration:
     """Class that generates points on the cams for every degree given
-    torque/gear ratios. Can also return force and energy output given stiffness.
+    torque/gear ratios. Can also return force and energy output given 
+    stiffness.
     """
     
     def __init__(self, gear_ratios, input_angles, scaling, sit_angle, offset_angle):
         """
         Parameters:
-        gear_ratios: desired gear ratio at each angle along the compound cam
+        gear_ratios: desired gear ratio at each keypoint along the
+            compound cam
         input_angles: angles at which to define the desired gear ratios
-        scaling: scalar multiple, e.g. 0.5, to determine overall size of cams
-        sit_angle: angle in radians along the compound cam at which force cable
-        is acting while the user is seated
-        offset_angle: angle in radians along the compound cam at which the 
-        energy storage band acts relative to the force transmission cable
+        scaling: scalar multiple to determine overall size of cams
+        sit_angle: angle in radians along the compound cam at which
+            force cable is acting while the user is seated
+        offset_angle: angle in radians along the compound cam at which 
+            the energy storage band acts relative to the force
+            transmission cable
         """
-        # Sort gear ratios and input angles in ascending order of input angles.
+        # Sort gear ratios and input angles in ascending order of input
+        # angles.
         self.input_angles = input_angles
         self.gear_ratios = gear_ratios
         sorted_inds = np.argsort(self.input_angles)
@@ -202,37 +206,41 @@ class CamGeneration:
         self.scaling = scaling
         self.cam_radii = np.ones((self.gear_ratios.shape[0], 2))
         self.n_interp = 360 
-        self.sit_ind = round(sit_angle * self.n_interp / (2*np.pi))
-        self.offset_ind = round(offset_angle * self.n_interp / (2*np.pi))
-        self.angles = np.arange(0, self.n_interp+1, 1) * 2*np.pi / self.n_interp 
-        self.pts_inner = None
-        self.pts_outer = None
+        self.sit_ind = round(np.rad2deg(sit_angle))
+        self.offset_ind = round(np.rad2deg(offset_angle))
+        self.angles = np.deg2rad(np.arange(0, self.n_interp+1, 1))
+        self.pts_trans = None
+        self.pts_stor = None
         self.dateStr = date.today().strftime("%Y-%m-%d")
 
     def calculate_cam_radii(self, user_height: float = 1.67, k: float = 0,
-                            plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
+                            plot: bool = False, save: bool = False, 
+                            save_dir: Optional[str] = None, index: int = 0):
         """Calculates the cam radii for each gear ratio and input angle.
-        Determines the convex hull of the given gear ratios and angles, then
-        interpolates between these points to generate the cam radii.
-        
+        Determines the convex hull of the given gear ratios and angles,
+        then interpolates between these points to generate the cam
+        radii.
+
         Parameters:
-        user_height: height, in meters, of the person the device is designed for
+        user_height: height, in meters, of the person the device is
+            designed for
         k: spring stiffness, in N/m, used only to label saved plots
         plot: if True, display intermediate and final cam plots
-        save: if True, save the final cam plot to disk (requires plot=True)
+        save: if True, save the final cam plot to disk (requires
+            plot=True)
         save_dir: directory to save the plot to; defaults to a dated
             subfolder of results/cams if not provided
         index: identifier appended to the saved plot's filename
 
         Returns:
-        pts_inner: ndarray, inner cam points in Cartesian space
-        pts_outer: ndarray, outer cam points in Cartesian space
+        pts_trans: ndarray, transmission cam points in Cartesian space
+        pts_stor: ndarray, storage cam points in Cartesian space
         radius_max: scalar maximum radius of the cam envelopes
         """
         
-        # Calculate initial cam keypoints using gear ratios and scaling factor.
-        # Check if any of the radii are smaller than the minimum allowed radius,
-        # in meters, and adjust as needed.
+        # Calculate initial cam keypoints using gear ratios and scaling
+        # factor. Check if any of the radii are smaller than the
+        # minimum allowed radius, in meters, and adjust as needed.
         radius_min = 0.005
         for ind, ratio in enumerate(self.gear_ratios):
             [r, R] = self.scaling * np.array([np.sqrt(ratio), 1/np.sqrt(ratio)])
@@ -256,35 +264,36 @@ class CamGeneration:
             plt.show()
             
         # Convert cam points to Cartesian space.
-        self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.input_angles),
+        self.pts_trans = (self.cam_radii[:, 0] * [np.cos(self.input_angles),
                                                   np.sin(self.input_angles)
                                                   ]).T
-        self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.input_angles),
+        self.pts_stor = (self.cam_radii[:, 1] * [np.cos(self.input_angles),
                                                   np.sin(self.input_angles)
                                                   ]).T
 
-        # Calculate points of convex hull for each cam. Results are cam radii
-        # (polar coordinates).
-        cam_radii_inner = self.convex_cam_pts(self.pts_inner, self.angles)
-        cam_radii_outer = self.convex_cam_pts(self.pts_outer, self.angles)
-        self.cam_radii = np.vstack((cam_radii_inner, cam_radii_outer)).T
+        # Calculate points of convex hull for each cam. Ouputs cam radii
+        # in polar coordinates.
+        cam_radii_trans = self.convex_cam_pts(self.pts_trans, self.angles)
+        cam_radii_stor = self.convex_cam_pts(self.pts_stor, self.angles)
+        self.cam_radii = np.vstack((cam_radii_trans, cam_radii_stor)).T
 
-        # Determine stroke length achieved by flexing knee from upright to 90
-        # degrees. This calculation is based on measurements taken in Song et
-        # al., 2022 (https://doi.org/10.1177/15589250221138546), linearly scaled
+        # Determine stroke length achieved by flexing knee from upright
+        # to 90 degrees. This calculation is based on measurements
+        # taken in Song et al., 2022
+        # (https://doi.org/10.1177/15589250221138546), linearly scaled
         # to the user's height.
         unstretch_len = 0.05
         stretch_pct = 1.016
         user_height_ref = 1.67
         stroke = user_height / user_height_ref * unstretch_len * stretch_pct
 
-        # Scale cam size to calculated stroke length. Iteratively check that the
-        # minimum radius, in meters, is not violated.
+        # Scale cam size to calculated stroke length. Iteratively check
+        # that the minimum radius, in meters, is not violated.
         ratio = 0
         threshold = 0.01
         r_min = 0.25 * .0254 # convert from inches to meters
         while abs(ratio - 1) > threshold:
-            x_trans = np.cumsum(self.cam_radii[:, 0] * 2*np.pi / self.n_interp)
+            x_trans = np.cumsum(np.deg2rad(self.cam_radii[:, 0]))
             ratio = stroke / x_trans[self.sit_ind]
             self.cam_radii *= ratio
             x_trans *= ratio
@@ -294,7 +303,7 @@ class CamGeneration:
                         point = r_min
         radius_max = np.max(self.cam_radii)
 
-        # Rotate values in outer cam to account for where storage cable leaves
+        # Rotate values in storage cam to account for where cable leaves
         # surface relative to where transmission cable leaves surface.
         cam_rotated, _ = self.rotate_cam(self.cam_radii[:, 1])
         self.cam_radii[:, 1] = cam_rotated
@@ -303,15 +312,16 @@ class CamGeneration:
             # Plot; saving is opt-in via save flag and save_dir
             self.plot_cams(self.cam_radii, k, index, save=save, save_dir=save_dir)
 
-        # Convert cam points to Cartesian space and return the final cam shapes.
-        self.pts_inner = (self.cam_radii[:, 0] * [np.cos(self.angles),
+        # Convert cam points to Cartesian space and return the final
+        # cam shapes.
+        self.pts_trans = (self.cam_radii[:, 0] * [np.cos(self.angles),
                                                   np.sin(self.angles)
                                                   ]).T
-        self.pts_outer = (self.cam_radii[:, 1] * [np.cos(self.angles),
+        self.pts_stor = (self.cam_radii[:, 1] * [np.cos(self.angles),
                                                   np.sin(self.angles)
                                                   ]).T
 
-        return self.cam_radii, self.pts_inner, self.pts_outer, radius_max, x_trans
+        return self.cam_radii, self.pts_trans, self.pts_stor, radius_max, x_trans
 
     def convex_cam_pts(self, points, angles):
         """
@@ -327,11 +337,15 @@ class CamGeneration:
         - numpy array
             The computed convex cam points in polar coordinates.
 
-        This function computes the convex cam points by performing the following steps:
+        This function computes the convex cam points by performing the
+        following steps:
         1. Compute the convex hull of the input points.
-        2. Convert the convex points into polar coordinates and interpolate between them.
-        3. Convert the interpolated points back into Cartesian coordinates.
-        4. Split the cam points into sub-arrays that monotonically increase or decrease in x.
+        2. Convert the convex points into polar coordinates and
+           interpolate between them.
+        3. Convert the interpolated points back into Cartesian
+           coordinates.
+        4. Split the cam points into sub-arrays that monotonically
+           increase or decrease in x.
         5. Flip any segments that are monotonically decreasing.
         6. Interpolate between the points in each sub-array.
         7. Convert the interpolated points into polar coordinates.
@@ -340,9 +354,11 @@ class CamGeneration:
         """
         # Compute the convex hull of the input points.
         hull = ConvexHull(points, incremental=True)
-        points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
+        points = np.vstack((points[hull.vertices, 0],
+                            points[hull.vertices, 1])).T
 
-        # Convert convex cam points to polar coordinates in range [0, 2*pi].
+        # Convert convex cam points to polar coordinates in range [0,
+        # 2*pi].
         radii_convex, angles_convex = self.to_polar(points)
 
         # Sort points in ascending order of angles.
@@ -363,10 +379,12 @@ class CamGeneration:
                                              fill_value='extrapolate')
         radii_interp = polar_cam_fcn(angles)
 
-        # Convert to Cartesian coordinates and calculate convex hull again.
+        # Convert to Cartesian coordinates and calculate convex hull
+        # again.
         points = (radii_interp * [np.cos(angles), np.sin(angles)]).T
         hull = ConvexHull(points, incremental=True)
-        points = np.vstack((points[hull.vertices, 0], points[hull.vertices, 1])).T
+        points = np.vstack((points[hull.vertices, 0],
+                            points[hull.vertices, 1])).T
 
         # Split Cartesian cam points into 2 or 3 sub-arrays that each
         # monotonically increase or decrease in x.
@@ -383,14 +401,16 @@ class CamGeneration:
         elif len(break_ind) == 1:
             points_array.append(points[break_ind[0]:, :])
 
-        # Flip any segments that are monotonically decreasing, which is required
-        # by numpy.interp(). Then, linearly interpolate between 100 points over
-        # the range of each sub-array and between the sub-arrays?. This fills
-        # any gaps that resulted from the convex hull operation.
+        # Flip any segments that are monotonically decreasing, which is
+        # required by numpy.interp(). Then, linearly interpolate between
+        # 100 points over the range of each sub-array and between the 
+        # sub-arrays. This fills any gaps that resulted from the convex
+        # hull operation.
         max_gap = 0.1
         interp_array = np.empty((0, 2))
         for ind, sub_array in enumerate(points_array):
-            # Identify any large gaps between sub-arrays and inerpolate over them.
+            # Identify any large gaps between sub-arrays and inerpolate
+            # over them.
             if ind != len(points_array) - 1:
                 if math.dist(sub_array[-1], points_array[ind+1][0]) > max_gap:
                     x1 = sub_array[-1, 0]
@@ -403,7 +423,8 @@ class CamGeneration:
                     else:
                         x = np.linspace(x1, x2, 100)
                         y = np.interp(x, [x1, x2], [y1, y2])
-                    interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+                    interp_array = np.concatenate((interp_array, 
+                                                   np.array([x, y]).T))
             else:
                 if math.dist(sub_array[-1], points_array[0][0]) > max_gap:
                     x1 = sub_array[-1, 0]
@@ -416,18 +437,21 @@ class CamGeneration:
                     else:
                         x = np.linspace(x1, x2, 100)
                         y = np.interp(x, [x1, x2], [y1, y2])
-                    interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+                    interp_array = np.concatenate((interp_array, 
+                                                   np.array([x, y]).T))
         for ind, sub_array in enumerate(points_array):
             # Flip segments that are monotonically decreasing.
             if not np.all(np.diff(sub_array[:, 0]) > 0):
                 points_array[ind] = np.flip(points_array[ind], 0)
+
         for ind, sub_array in enumerate(points_array):
             x = np.linspace(sub_array[0, 0], sub_array[-1, 0], 100)
             y = np.interp(x, sub_array[:, 0], sub_array[:, 1])
-            interp_array = np.concatenate((interp_array, np.array([x, y]).T))
+            interp_array = np.concatenate((interp_array, 
+                                           np.array([x, y]).T))
 
-        # Convert interpolated convex cam points into polar coordinates in range
-        # [0, 2*pi].
+        # Convert interpolated convex cam points into polar coordinates
+        # in range [0, 2*pi].
         radii_interp, angles_interp = self.to_polar(interp_array)
 
         # Remove duplicates to avoid errors in interpolation.
@@ -435,8 +459,8 @@ class CamGeneration:
         angles_interp = dup_removed[0]
         radii_interp = dup_removed[1]
 
-        # Pad arrays to ensure continuity at end points. Cubically interpolate
-        # between points in polar coordinates and return.
+        # Pad arrays to ensure continuity at end points. Cubically
+        # interpolate between points in polar coordinates and return.
         radii_interp = np.append(radii_interp, radii_interp[0])
         angles_interp = np.append(angles_interp, angles_interp[0] + 2*np.pi)
         radii_interp = np.insert(radii_interp, 0, radii_interp[-2])
@@ -464,25 +488,26 @@ class CamGeneration:
         cam_original: unmodified copy of the input radii
         """
         cam_original = radii.copy()
-        outer_1 = radii[: self.offset_ind]
-        outer_2 = radii[self.offset_ind :]
-        cam_rotated = np.concatenate((outer_2, outer_1))
+        radii_1 = radii[: self.offset_ind]
+        radii_2 = radii[self.offset_ind :]
+        cam_rotated = np.concatenate((radii_2, radii_1))
         return cam_rotated, cam_original
 
     def derotate_cam(self, radii):
-        """Undo the cyclic shift applied by rotate_cam, restoring radii to
-        their original angular indexing.
+        """Undo the cyclic shift applied by rotate_cam, restoring radii
+        to their original angular indexing.
         """
-        outer_1 = radii[-self.offset_ind :]
-        outer_2 = radii[: -self.offset_ind]
-        cam_derotated = np.concatenate((outer_1, outer_2))
+        radii_1 = radii[-self.offset_ind :]
+        radii_2 = radii[: -self.offset_ind]
+        cam_derotated = np.concatenate((radii_1, radii_2))
         return cam_derotated
     
-    def calc_forces(self, cam_radii, x_trans, k,
-                    torque: bool = False, plot: bool = False, save: bool = False, save_dir: Optional[str] = None, index: int = 0):
+    def calc_forces(self, cam_radii, x_trans, k, torque: bool = False, 
+                    plot: bool = False, save: bool = False,
+                    save_dir: Optional[str] = None, index: int = 0):
         """
-        Calculate the cable force profiles vs. stance percentage given the
-        solved cam radii.
+        Calculate the cable force profiles vs. stance percentage given
+        the solved cam radii.
 
         The order of causality is:
         stance percentages -> 
@@ -494,17 +519,21 @@ class CamGeneration:
         transmission cable force
         """
 
-        # Define cam radii corresponding to each angle of rotation.
+        # Define transmission and storage cam radii corresponding to 
+        # each angle of rotation.
         cam_radii_trans = cam_radii[:, 0]
         cam_radii_stor = self.derotate_cam(cam_radii[:, 1])
 
         # Calculate effective cam moment arms and gear ratio at each angle.
-        # get_moment_arms only fills indices [0, sit_ind); beyond that both
-        # arrays are left as 0 (non-functional region), so divide only where
-        # the denominator is nonzero to avoid a 0/0 RuntimeWarning and leave
-        # those unused entries as 0.
-        cam_moment_arms_trans = self.get_moment_arms(cam_radii_trans, sit_ind=self.sit_ind)
-        cam_moment_arms_stor = self.get_moment_arms(cam_radii_stor, sit_ind=self.sit_ind)
+        cam_moment_arms_trans = self.get_moment_arms(cam_radii_trans,
+                                                     sit_ind=self.sit_ind)
+        cam_moment_arms_stor = self.get_moment_arms(cam_radii_stor,
+                                                    sit_ind=self.sit_ind)
+
+        # get_moment_arms only fills indices [0, sit_ind); beyond that 
+        # both arrays are left as 0 (non-functional region), so divide 
+        # only where the denominator is nonzero to avoid a 0/0
+        # RuntimeWarning and leave those unused entries as 0.
         gear_ratios = np.divide(cam_moment_arms_stor, cam_moment_arms_trans,
                                 out=np.zeros_like(cam_moment_arms_stor),
                                 where=cam_moment_arms_trans != 0)
@@ -512,11 +541,11 @@ class CamGeneration:
         # Calculate storage cable displacement using the assumption of 
         # circular shape between subsequent points.
         # TODO: model this more accurately.
-        x_stor = np.cumsum(cam_radii_stor * 2 * np.pi / self.n_interp)
+        x_stor = np.cumsum(np.deg2rad(cam_radii_stor))
 
         # Calculate tension in both cables.
         f_stor = k * x_stor
-        f_trans =  f_stor * gear_ratios
+        f_trans = f_stor * gear_ratios
 
         # Stored energy vs. storage cable displacement
         E = trapezoid(f_stor, x_stor)
@@ -524,141 +553,144 @@ class CamGeneration:
 
         if plot:
             plt = _get_plt()
-            plt.figure()
             plt.plot(100 * x_trans[:self.sit_ind], f_trans[:self.sit_ind],
-                     label='Transmission cable force vs. displacement (unscaled)', linewidth=3)
+                     linewidth=3)
             plt.legend(loc='upper right')
-            plt.xlabel('Transmission cable displacement (cm)')
+            plt.xlabel('Transmission Cable Displacement (cm)')
             plt.ylabel('Force (N)')
+            plt.title('Transmission Cable Force vs. Displacement')
             plt.show()
 
             plt.figure()
             plt.plot(100 * x_stor[:self.sit_ind], f_stor[:self.sit_ind],
-                     label='Storage cable force vs. displacement (unscaled)', linewidth=3)
+                     linewidth=3)
             plt.legend(loc='upper right')
-            plt.xlabel('Storage cable displacement (cm)')
+            plt.xlabel('Storage Cable Displacement (cm)')
             plt.ylabel('Force (N)')
+            plt.title('Storage Cable Force vs. Displacement')
             plt.show()
 
         # Generate knee angles corresponding to stance percentage.
         percentages = np.linspace(0, 100, self.sit_ind)
         knee_angles = self.knee_angle_to_stance(percentages)
 
-        # Flip knee angles and percentages to correspond with cam angle index,
-        # which increases from stand to sit.
+        # Flip knee angles and percentages to correspond with cam angle
+        # index, which increases from stand to sit.
         percentages = percentages[::-1]
         knee_angles = knee_angles[::-1]
 
-        # Scale transmission cable displacement by the normalized knee angle.
-        # At this point, x_trans_scaled should decrease with increasing index.
+        # Scale transmission cable displacement by the normalized knee
+        # angle. At this point, x_trans_scaled should decrease with
+        # increasing index.
         x_trans_scaled = (x_trans[self.sit_ind]
                           * (knee_angles - np.min(knee_angles))
                           / np.ptp(knee_angles)) 
 
-        # Isolate "effective" portions of x_trans (from 0 to 220 degrees) and
-        # flip order to match the order of knee angles, which go from sit to
-        # stand.
+        # Isolate "effective" portions of x_trans (from 0 to 220
+        # degrees) and flip order to match the order of knee angles,
+        # which go from sit to stand.
         x_trans = x_trans[:self.sit_ind]
         x_trans = x_trans[::-1]
 
         if plot:
+            # Plot knee angle vs. cable displacement
             plt = _get_plt()
-
-            # Plot knee angle vs. cable displacement to verify
-            plt.figure()
             plt.plot(knee_angles, 100 * x_trans_scaled)
             plt.xlabel('Knee Angle (degrees)')
-            plt.ylabel('Transmission Cable Displacement, xc (cm)')
+            plt.ylabel('Transmission Cable Displacement (cm)')
+            plt.title('Transmission Cable Displacement vs. Knee Angle')
 
-            # Plot stance percentage vs. cable displacement to verify
+            # Plot stance percentage vs. cable displacement
             plt.figure()
             plt.plot(percentages, 100 * x_trans_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Transmission Cable Displacement (cm)')
+            plt.title('Transmission Cable Displacement vs. Stance Percentage (Scaled to Knee Angle)')
 
         if np.any(np.isnan(x_trans)):
             logger.warning("NaN detected in x_trans passed to calc_forces")
         
         # Remove duplicate points from cable path information (and
-        # corresponding points from the angles and storage cable path) to 
-        # avoid errors in interpolation.
-        dup_removed = self.remove_duplicates(x_trans, self.angles[:x_trans.size], x_stor)
+        # corresponding points from the angles and storage cable path)
+        # to avoid errors in interpolation.
+        dup_removed = self.remove_duplicates(x_trans,
+                                             self.angles[:x_trans.size],
+                                             x_stor)
         x_trans = dup_removed[0]
         cam_angles = dup_removed[1]
         x_stor = dup_removed[2]
 
-        # Create functions relating transmission cable displacement to cam 
-        # angle and relating cam angle to storage cable displacement.
-        trans_cable_displacement_to_angle = interpolate.interp1d(x_trans,
-                                                                 cam_angles,
-                                                                 kind='cubic',
-                                                                 fill_value='extrapolate')
-        cam_angle_to_stor_cable_displacement = interpolate.interp1d(cam_angles,
-                                                                    x_stor,
-                                                                    kind='cubic',
-                                                                    fill_value='extrapolate')
+        # Create functions relating transmission cable displacement to
+        # cam angle and relating cam angle to storage cable
+        # displacement.
+        trans_disp_to_angle = interpolate.interp1d(x_trans, cam_angles,
+                                                   kind='cubic',
+                                                   fill_value='extrapolate')
+        angle_to_stor_disp = interpolate.interp1d(cam_angles, x_stor,
+                                                  kind='cubic',
+                                                  fill_value='extrapolate')
         
-        # Use scaled cable displacement to find cam angle as driven by knee 
-        # rotation.
-        angle_scaled = trans_cable_displacement_to_angle(x_trans_scaled)
+        # Use scaled cable displacement to find cam angle as driven by
+        # knee rotation.
+        angle_scaled = trans_disp_to_angle(x_trans_scaled)
 
         # Use knee-driven cam angle to find scaled storage cable displacement.
-        x_stor_scaled = cam_angle_to_stor_cable_displacement(angle_scaled)
+        x_stor_scaled = angle_to_stor_disp(angle_scaled)
 
-        # Find gear ratio at each cam angle corresponding to scaled cable displacement.
-        cam_angles_to_gear_ratios = interpolate.interp1d(cam_angles, gear_ratios[:len(cam_angles)], kind='cubic', fill_value='extrapolate')
-        gear_ratios_scaled = cam_angles_to_gear_ratios(angle_scaled)
+        # Find gear ratio at each cam angle corresponding to scaled
+        # cable displacement.
+        angles_to_gear_ratios = interpolate.interp1d(cam_angles,
+                                                     gear_ratios[:len(cam_angles)],
+                                                     kind='cubic',
+                                                     fill_value='extrapolate')
+        gear_ratios_scaled = angles_to_gear_ratios(angle_scaled)
 
-        # Find transmission cable force based on the storage cable displacement,
-        # spring stiffness, and gear ratio at each point.
+        # Find transmission cable force based on the storage cable
+        # displacement, spring stiffness, and gear ratio at each point.
         f_stor_scaled = k * x_stor_scaled
         f_trans_scaled = f_stor_scaled * gear_ratios_scaled
         
         # Plot and save values.
         if plot:
+            # Plot cam angle vs. stance percentage.
             plt = _get_plt()
-
-            # plot cam angle vs. stance percentage
-            plt.figure()
             plt.plot(percentages, angle_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cam Angle (rad)')
+            plt.title('Cam Angle vs. Stance Percentage (Scaled to Knee Angle)')
 
-            # Plot storage cable displacement vs. stance percentage. Flip 
-            # percentages, since storage cable displacement is opposite to
-            # transmission cable.
+            # Plot storage cable displacement vs. stance percentage.
             plt.figure()
             plt.plot(percentages, x_stor_scaled)
             plt.xlabel('Stance Percentage (%)')
-            plt.ylabel('Storage cable displacement (m)')
+            plt.ylabel('Storage Cable Displacement (m)')
+            plt.title('Storage Cable Displacement vs. Stance Percentage (Scaled to Knee Angle)')
 
             # Plot & save transmission cable force vs. stance percentage.
             plt.figure()
-            plt.plot(percentages, f_trans_scaled,
-                     label='Cable Force', linewidth=3)
+            plt.plot(percentages, f_trans_scaled, linewidth=3)
             plt.legend(loc='upper right')
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Force (N)')
+            plt.title('Transmission Cable Tension vs. Stance Percentage (Scaled to Knee Angle)')
             plt.xlim([0, 100])
             if save:
-                filepath = save_dir or ('results/force_plots/force_plots_' + self.dateStr)
+                filepath = save_dir or ('results/forces/forces_' + self.dateStr)
                 filename = str(Path(filepath) / f'force_plot_{index}.png')
-                # Save the plotted figure
-                logging.debug("Calling _save_plot with filename: %s", filename)
                 self._save_plot(plt, filename)
 
-                # Plot & save transmission cable force vs. scaled cable displacement
+                # Plot & save transmission cable force vs. scaled cable
+                # displacement.
                 plt.figure()
                 plt.plot(100 * x_trans_scaled, f_trans_scaled)
-                plt.xlabel('Transmission cable displacement (cm)')
-                plt.ylabel('Transmission cable force (N)')
-                plt.title('Transmission cable force vs. displacement; scaled to knee angle')
+                plt.xlabel('Cable displacement (cm)')
+                plt.ylabel('Force (N)')
+                plt.title('Transmission Cable Tension vs. Displacement (Scaled to Knee Angle)')
                 filename = str(Path(filepath) / f'force_plot_unscaled_{index}.png')
-                logging.debug("Calling _save_plot with filename: %s", filename)
                 self._save_plot(plt, filename)
 
+                # Save data to CSV for further analysis.
                 out_file = str(Path(filepath) / f'_force_output{index}.csv')
-                logging.debug("Calling _save_array with output file: %s", out_file)
                 self._save_array(out_file,
                                  np.stack((cam_angles,
                                            percentages,
@@ -680,31 +712,35 @@ class CamGeneration:
                 logging.debug("Successfully saved force output to: %s", out_file)
             if torque:
                 plt.figure()
-                plt.scatter(cam_angles * 360 / (2*np.pi),
+                plt.scatter(np.rad2deg(cam_angles),
                             f_stor * cam_moment_arms_trans[:len(cam_angles)],
-                            label='Torque vs. angle', linewidth=3)
+                            linewidth=3)
                 plt.xlabel('Angle (deg)')
                 plt.ylabel('Torque (N-m)')
+                plt.title('Torque vs. Angle')
             plt.show()
 
         return f_trans_scaled, percentages
 
     def get_moment_arms(self, r, sit_ind):
         """
-        Estimate the effective cam moment arm at each degree of rotation, up
-        to sit_ind.
+        Estimate the effective cam moment arm at each degree of
+        rotation, up to sit_ind.
 
-        A cable wrapped around a non-circular cam does not necessarily leave
-        the surface tangentially at the nominal point; the true moment arm is
-        the largest projected radius among nearby points on the profile. For
-        each degree `cam_deg` on the cam, this searches the points within
-        ±90 degrees of it and takes the one whose radius, projected onto the
-        cable direction at cam_deg, is largest.
+        A cable wrapped around a non-circular cam does not necessarily
+        leave the surface tangentially at the nominal point; the true
+        moment arm is the largest projected radius among nearby points
+        on the profile. For each degree `cam_deg` on the cam, this
+        searches the points within ±90 degrees of it and takes the one
+        whose radius, projected onto the normal of the cable direction
+        at cam_deg (simplified to be constant), is largest.
 
         Parameters:
-        r: cam radii at each integer degree of rotation (indexed by degree)
-        sit_ind: index (degree) up to which moment arms are computed; points
-            beyond this are not part of the cam's effective range
+        r: cam radii at each integer degree of rotation (indexed by
+            degree)
+        sit_ind: index (degree) up to which moment arms are computed;
+            points beyond this are not part of the cam's effective
+            range
 
         Returns:
         numpy.ndarray
@@ -723,11 +759,12 @@ class CamGeneration:
                     # clamp to the last point in range (360 degrees)
                     offset_deg = 360 - cam_deg
                 else:
-                    # offset_ind - 90 gives a range of -90 to +90 degrees
-                    # relative to cam_deg
+                    # offset_ind - 90 gives a range of -90 to +90
+                    # degrees relative to cam_deg
                     offset_deg = offset_ind - 90
 
-                x_candidates[offset_ind] = r[cam_deg + offset_deg] * np.cos(np.deg2rad(offset_deg))
+                x_candidates[offset_ind] = (r[cam_deg+offset_deg] 
+                                            * np.cos(np.deg2rad(offset_deg)))
 
             x_effective[cam_deg] = max(x_candidates)
 
@@ -741,34 +778,36 @@ class CamGeneration:
         """See module-level percentage_to_x."""
         return percentage_to_x(percentages_in, stroke)
     
-    def generate_sit_cam(self, r_si2st, ang_si2st, r_stor, k,
-                         n_params=6):
+    def generate_sit_cam(self, r_si2st, ang_si2st, r_stor, k, n_params=6):
         """
-        Optimize a stand-to-sit transmission cam profile that pairs with an
-        existing pair of sit-to-stand transmission and storage cams, minimizing
-        peak transmission cable force while matching path length and end-point 
-        radii between the two transmission cams.
+        Optimize a stand-to-sit transmission cam profile that pairs with
+        an existing pair of sit-to-stand transmission and storage cams,
+        minimizing peak transmission cable force while matching path
+        length and end-point radii between the two transmission cams.
 
         Parameters:
-        r_si2st: radii of the previously generated sit-to-stand cam (used as 
-                 matching constraints)
+        r_si2st: radii of the previously generated sit-to-stand cam
+                 (used as matching constraints)
         ang_si2st: angles corresponding to r_si2st
-        r_stor: storage cam radii to pair with the new stand-to-sit 
+        r_stor: storage cam radii to pair with the new stand-to-sit
                 transmission cam
         k: spring stiffness, in N/m, used in the force calculation
-        n_params: number of angle/radius keypoints used to parameterize the
-                  stand-to-sit cam profile before taking its convex hull
+        n_params: number of angle/radius keypoints used to parameterize
+                  the stand-to-sit cam profile before taking its convex
+                  hull
 
         Returns:
         result: the optimization result object from cobyqa.minimize
-        r_st2si: optimized stand-to-sit transmission cam radii at every angle
-        x_trans_st2si: cumulative transmission cable displacement for r_st2si
+        r_st2si: optimized stand-to-sit transmission cam radii at every
+                 angle
+        x_trans_st2si: cumulative transmission cable displacement for
+                       r_st2si
         r_st2si_cart: r_st2si converted to Cartesian (x, y) coordinates
         """
 
         def params_to_convex_radii(x):
-            # Take radii/angle keypoint parameters and return a smoothed,
-            # convex cam profile.
+            # Take radii/angle keypoint parameters and return a
+            # smoothed, convex cam profile.
             key_angles = x[:n_params]
             key_radii = x[n_params:]
             pts = (key_radii * [np.cos(key_angles), np.sin(key_angles)]).T
@@ -776,9 +815,9 @@ class CamGeneration:
             return radii_convex
 
         # NONLINEAR CONSTRAINTS:
-        # 1. Constrain the path lengths of the stand-to-sit and sit-to-stand
-        # cams to be equal within a threshold.
-        x_trans_si2st = np.cumsum(r_si2st * 2*np.pi / self.n_interp)
+        # 1. Constrain the path lengths of the stand-to-sit and
+        # sit-to-stand cams to be equal within a threshold.
+        x_trans_si2st = np.cumsum(np.deg2rad(r_si2st))
         path_length_si2st = x_trans_si2st[self.sit_ind]
         thresh_path = 0.001 # meters
         ub_path = path_length_si2st + thresh_path
@@ -789,7 +828,7 @@ class CamGeneration:
             r_st2si = params_to_convex_radii(x)
 
             # Calculate and return path length.
-            x_trans_st2si = np.cumsum(r_st2si * 2*np.pi / self.n_interp)
+            x_trans_st2si = np.cumsum(np.deg2rad(r_st2si))
             return x_trans_st2si[-1]
         
         path_constraint = NonlinearConstraint(constr_path, lb_path, ub_path,
@@ -805,8 +844,8 @@ class CamGeneration:
             # Get stand-to-sit transmission cam radii.
             r_st2si = params_to_convex_radii(x)
 
-            # Calculate and return the difference between the end-point radii 
-            # of the two transmission cams.
+            # Calculate and return the difference between the end-point
+            # radii of the two transmission cams.
             return np.array([r_st2si[0] - r_si2st[0],
                              r_st2si[-1] - r_si2st[self.sit_ind]])
         
@@ -816,19 +855,20 @@ class CamGeneration:
         constraint_array = [path_constraint, end_constraint]
 
         # OBJECTIVE:
-        # Minimize maximum force generated by stand-to-sit transmission cam in
-        # combination with storage cam.
+        # Minimize maximum force generated by stand-to-sit transmission
+        # cam in combination with storage cam.
         def objective(x):
             # Get stand-to-sit transmission cam radii.
             r_st2si = params_to_convex_radii(x)
 
-            # Add the "non-functional" cam radii from the sit-to-stand cam
-            # (from the sit angle and above) to the stand-to-sit cam radii.
+            # Add the "non-functional" cam radii from the sit-to-stand
+            # cam (from the sit angle and above) to the stand-to-sit cam
+            # radii.
             r_st2si = np.concatenate((r_st2si, r_si2st[self.sit_ind:]))
 
             # Prepare cam radii and cable path for force calculation.
             r_dual_st2si = np.vstack((r_st2si, r_stor)).T
-            x_trans_st2si = np.cumsum(r_st2si * 2*np.pi / self.n_interp)
+            x_trans_st2si = np.cumsum(np.deg2rad(r_st2si))
 
             forces, percentages = self.calc_forces(r_dual_st2si, x_trans_st2si,
                                                    k, torque=False)
@@ -837,10 +877,10 @@ class CamGeneration:
             return np.max(forces)
 
         # INITIAL GUESS:
-        # A triangular profile (in terms of radii) between the end points with 
-        # the correct path length.
-        r_max = (path_length_si2st * (self.n_interp / (np.pi * self.sit_ind)) -
-                 0.5 * (r_si2st[0] + r_si2st[self.sit_ind]))
+        # A triangular profile (in terms of radii) between the end
+        # points with the correct path length.
+        r_max = (2*path_length_si2st/(np.deg2rad(self.sit_ind)) 
+                 - 0.5*(r_si2st[0]+r_si2st[self.sit_ind]))
         r_1 = np.linspace(r_si2st[0], r_max, num=int(n_params/2))
         r_2 = np.linspace(r_max, r_si2st[self.sit_ind], num=int(n_params/2))
         r_0 = np.concatenate((r_1, r_2))
@@ -854,17 +894,16 @@ class CamGeneration:
         plt = _get_plt()
         from matplotlib.ticker import MaxNLocator
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(ang_0, r_0 * 100, label='Initial guess')
+        ax.plot(ang_0, r_0 * 100)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
         ax.set_rlim(bottom=0)
-        # ax.set_rlabel_position(135)
         ax.set_ylabel('Radius (cm)', labelpad=30)
         plt.title("Initial Guess for Optimization")
         plt.show()
 
         # MINIMIZE:
-        # Perform the optimization. Import minimize lazily so the module can be 
-        # imported without optional deps.
+        # Perform the optimization. Import minimize lazily so the
+        # module can be imported without optional deps.
         try:
             from cobyqa import minimize
         except Exception:
@@ -876,12 +915,12 @@ class CamGeneration:
                           constraints=constraint_array)
 
         # POST-PROCESSING
-        # Add the "non-functional" cam radii from the sit-to-stand cam (from 
-        # the sit angle and above) to the stand-to-sit cam radii. Log and plot 
-        # the results.
+        # Add the "non-functional" cam radii from the sit-to-stand cam
+        # (from the sit angle and above) to the stand-to-sit cam radii.
+        # Log and plot the results.
         r_st2si = params_to_convex_radii(result.x)
         r_st2si = np.concatenate((r_st2si, r_si2st[self.sit_ind :]))
-        x_trans_st2si = np.cumsum(r_st2si * 2*np.pi / self.n_interp)
+        x_trans_st2si = np.cumsum(np.deg2rad(r_st2si))
         logger.info("Stand-to-Sit cam path length (360 deg): %s", x_trans_st2si[-1])
         logger.info("Stand-to-Sit cam path length (220 deg): %s", x_trans_st2si[self.sit_ind])
         logger.info("Sit-to-Stand cam path length: %s", path_length_si2st)
@@ -890,7 +929,7 @@ class CamGeneration:
 
         # Plot the optimized stand-to-sit cam for visual inspection.
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.plot(ang_si2st, r_st2si * 100, label='Stand-to-Sit Cam')
+        ax.plot(ang_si2st, r_st2si * 100)
         ax.set_ylabel('Radius (cm)', labelpad=30)
         ax.set_title("Stand-to-Sit Cam")
         plt.show()
@@ -970,57 +1009,61 @@ class CamGeneration:
         angles = np.mod(np.arctan2(points[:, 1], points[:, 0]), 2 * np.pi)
         return radii, angles
 
-    # --- File I/O helpers -------------------------------------------------
+    # --- File I/O helpers -------------------------------------------------- #
     def _ensure_dir(self, dirpath: str | Path) -> None:
-        """Ensure a directory exists (create if needed). Accepts a string or Path."""
+        """Ensure a directory exists (create if needed). Accepts a
+        string or Path.
+        """
         if not dirpath:
             return
         p = Path(dirpath)
         if not p.exists():
             p.mkdir(parents=True, exist_ok=True)
 
-    def _save_plot(self, plt_module, filepath: str | Path, dpi: int = 300, bbox_inches: str | None = 'tight') -> None:
+    def _save_plot(self, plt_module, filepath: str | Path, dpi: int = 300, 
+                   bbox_inches: str | None = 'tight') -> None:
         """Save a plot using the provided matplotlib.pyplot module.
 
         Ensures directory exists before calling plt.savefig.
         """
-        logging.debug("In _save_plot!")
         p = Path(filepath)
         self._ensure_dir(p.parent)
-        # matplotlib accepts Path-like objects in recent versions but convert to str for compatibility
+        # matplotlib accepts Path-like objects in recent versions but
+        # convert to str for compatibility
         outpath = str(p)
         if bbox_inches is not None:
             plt_module.savefig(outpath, dpi=dpi, bbox_inches=bbox_inches)
-            logging.debug(f"Saved plot to {outpath} with bbox_inches={bbox_inches}")
         else:
             plt_module.savefig(outpath, dpi=dpi)
-            logging.debug(f"Saved plot to {outpath} with tight bounding box")
 
-    def _save_array(self, filepath: str | Path, arr: np.ndarray, header: str | None = None, delimiter: str = ',') -> None:
-        """Save an array to a text file, ensuring the containing directory exists."""
+    def _save_array(self, filepath: str | Path, arr: np.ndarray, 
+                    header: str | None = None, delimiter: str = ',') -> None:
+        """Save an array to a text file, ensuring the containing
+        directory exists.
+        """
         p = Path(filepath)
         self._ensure_dir(p.parent)
         np.savetxt(str(p), arr, delimiter=delimiter, header=header)
 
-    def plot_cams(self, cam_radii=0, k=0, index=0, save: bool = False, save_dir: Optional[str] = None):
+    def plot_cams(self, cam_radii=0, k=0, index=0, save: bool = False, 
+                  save_dir: Optional[str] = None):
         """
         Plots the cam points in polar coordinates.
         """
         plt = _get_plt()
-        r = 100*self.cam_radii[:, 0]
-        R = 100*self.cam_radii[:, 1]
-        plt.figure()
+        r = 100 * self.cam_radii[:, 0]
+        R = 100 * self.cam_radii[:, 1]
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.plot(self.angles, r, label='Transmission cam')
         ax.plot(self.angles, R, label='Storage cam')
         ax.legend(loc='lower right')
         ax.set_xticklabels([])
         ax.grid(True)
-        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
+        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} \
+            cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
 
         if save:
-            logging.debug("Saving cam plot for index %s", index)
-            target_dir = save_dir or ('results/cams/cams_' + self.dateStr + '/plots')
+            target_dir = save_dir or ('results/cams/cams_' + self.dateStr + '/cam_plots')
             filename = str(Path(target_dir) / f'cam_plot_{index}.png')
             self._save_plot(plt, filename, bbox_inches='tight')
         plt.show()
