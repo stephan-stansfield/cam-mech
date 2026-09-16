@@ -260,7 +260,7 @@ class CamGeneration:
             ax.scatter(self.input_angles, self.cam_radii[:, 0])
             ax.scatter(self.input_angles, self.cam_radii[:, 1] )
             ax.grid(True)
-            ax.set_title('original, scaled cam points')
+            ax.set_title('Optimization input parameters:\nscaled gear ratios and angles')
             plt.show()
             
         # Convert cam points to Cartesian space.
@@ -310,7 +310,7 @@ class CamGeneration:
 
         if plot:
             # Plot; saving is opt-in via save flag and save_dir
-            self.plot_cams(self.cam_radii, k, index, save=save, save_dir=save_dir)
+            self.plot_cams(self.cam_radii, k, index, save=save)
 
         # Convert cam points to Cartesian space and return the final
         # cam shapes.
@@ -553,22 +553,25 @@ class CamGeneration:
 
         if plot:
             plt = _get_plt()
-            plt.plot(100 * x_trans[:self.sit_ind], f_trans[:self.sit_ind],
-                     linewidth=3)
-            plt.legend(loc='upper right')
+            plt.plot(100 * x_trans[self.sit_ind:0:-1], f_trans[:self.sit_ind],
+                                 linewidth=3)
             plt.xlabel('Transmission Cable Displacement (cm)')
             plt.ylabel('Force (N)')
             plt.title('Transmission Cable Force vs. Displacement')
             plt.show()
 
+            """
+            # This plot may be useful for debugging, but is not 
+            # particularly interesting otherwise, as it just shows a 
+            # linear relationship between force and displacement.
             plt.figure()
             plt.plot(100 * x_stor[:self.sit_ind], f_stor[:self.sit_ind],
                      linewidth=3)
-            plt.legend(loc='upper right')
             plt.xlabel('Storage Cable Displacement (cm)')
             plt.ylabel('Force (N)')
             plt.title('Storage Cable Force vs. Displacement')
             plt.show()
+            """
 
         # Generate knee angles corresponding to stance percentage.
         percentages = np.linspace(0, 100, self.sit_ind)
@@ -594,11 +597,16 @@ class CamGeneration:
 
         if plot:
             # Plot knee angle vs. cable displacement
+            """
+            # This plot may be useful for debugging, but is not 
+            # particularly interesting otherwise, as it just shows a 
+            # linear relationship between knee angle and displacement.
             plt = _get_plt()
             plt.plot(knee_angles, 100 * x_trans_scaled)
             plt.xlabel('Knee Angle (degrees)')
             plt.ylabel('Transmission Cable Displacement (cm)')
             plt.title('Transmission Cable Displacement vs. Knee Angle')
+            """
 
             # Plot stance percentage vs. cable displacement
             plt.figure()
@@ -654,6 +662,7 @@ class CamGeneration:
         if plot:
             # Plot cam angle vs. stance percentage.
             plt = _get_plt()
+            plt.figure()
             plt.plot(percentages, angle_scaled)
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Cam Angle (rad)')
@@ -666,10 +675,9 @@ class CamGeneration:
             plt.ylabel('Storage Cable Displacement (m)')
             plt.title('Storage Cable Displacement vs. Stance Percentage (Scaled to Knee Angle)')
 
-            # Plot & save transmission cable force vs. stance percentage.
+            # Plot (& save) transmission cable force vs. stance percentage.
             plt.figure()
             plt.plot(percentages, f_trans_scaled, linewidth=3)
-            plt.legend(loc='upper right')
             plt.xlabel('Stance Percentage (%)')
             plt.ylabel('Force (N)')
             plt.title('Transmission Cable Tension vs. Stance Percentage (Scaled to Knee Angle)')
@@ -679,13 +687,14 @@ class CamGeneration:
                 filename = str(Path(filepath) / f'force_plot_{index}.png')
                 self._save_plot(plt, filename)
 
-                # Plot & save transmission cable force vs. scaled cable
-                # displacement.
-                plt.figure()
-                plt.plot(100 * x_trans_scaled, f_trans_scaled)
-                plt.xlabel('Cable displacement (cm)')
-                plt.ylabel('Force (N)')
-                plt.title('Transmission Cable Tension vs. Displacement (Scaled to Knee Angle)')
+            # Plot (& save) transmission cable force vs. scaled cable
+            # displacement.
+            plt.figure()
+            plt.plot(100 * x_trans_scaled, f_trans_scaled)
+            plt.xlabel('Cable displacement (cm)')
+            plt.ylabel('Force (N)')
+            plt.title('Transmission Cable Tension vs. Displacement (Scaled to Knee Angle)')
+            if save:
                 filename = str(Path(filepath) / f'force_plot_unscaled_{index}.png')
                 self._save_plot(plt, filename)
 
@@ -1056,11 +1065,10 @@ class CamGeneration:
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
         ax.plot(self.angles, r, label='Transmission cam')
         ax.plot(self.angles, R, label='Storage cam')
-        ax.legend(loc='lower right')
+        ax.legend(bbox_to_anchor=(1, 0), loc='lower left')
         ax.set_xticklabels([])
-        ax.grid(True)
-        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} \
-            cm, max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
+        ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, """
+                     f"""max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
 
         if save:
             target_dir = save_dir or ('results/cams/cams_' + self.dateStr + '/cam_plots')
