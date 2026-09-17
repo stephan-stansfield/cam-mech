@@ -1067,6 +1067,7 @@ class CamGeneration:
         ax.plot(self.angles, R, label='Storage cam')
         ax.legend(bbox_to_anchor=(1, 0), loc='lower left')
         ax.set_xticklabels([])
+        ax.set_ylim([0, 7])
         ax.set_title(f"""Cam shapes\nmin radius={100*np.min(self.cam_radii):.2f} cm, """
                      f"""max radius={100*np.max(self.cam_radii):.2f} cm\nK={k} N/m""")
 
